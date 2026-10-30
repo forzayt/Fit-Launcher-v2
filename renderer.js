@@ -335,9 +335,15 @@
 
   function requirementsBody(data, tab) {
     const requirements = data[`${tab}Requirements`] || {};
+    const trimHeading = (html) =>
+      String(html || '')
+        .replace(/^\s*<strong>\s*(Minimum|Recommended):?\s*<\/strong>/i, '')
+        .replace(/^\s*<br\s*\/?>/i, '');
     const block = (title, html) =>
       html
-        ? `<div class="req-block"><h4>${title}</h4><div class="rich-text">${sanitizeRichHtml(html)}</div></div>`
+        ? `<div class="req-block"><h4>${title}</h4><div class="rich-text">${sanitizeRichHtml(
+            trimHeading(html),
+          )}</div></div>`
         : '';
 
     return block('Minimum', requirements.minimum) + block('Recommended', requirements.recommended);
@@ -1808,6 +1814,30 @@
         return;
       }
 
+      const shot = target.closest('[data-shot-index]');
+      if (shot) {
+        openLightbox(Number(shot.dataset.shotIndex) || 0);
+        return;
+      }
+
+      const lightboxClose = target.closest('[data-lightbox-close]');
+      if (lightboxClose) {
+        closeLightbox();
+        return;
+      }
+
+      const lightboxDirection = target.closest('[data-lightbox-dir]');
+      if (lightboxDirection) {
+        moveLightbox(Number(lightboxDirection.dataset.lightboxDir) || 1);
+        return;
+      }
+
+      const requirementTab = target.closest('[data-req-tab]');
+      if (requirementTab) {
+        updateRequirementsTab(requirementTab.dataset.reqTab);
+        return;
+      }
+
       const action = target.closest('[data-action]');
       if (action) {
         handleAction(action.dataset.action);
@@ -1872,7 +1902,31 @@
       if (event.target.closest('[data-open-app]')) closeSearch();
     });
 
+    const lightbox = $('#lightbox');
+    lightbox?.addEventListener('click', (event) => {
+      if (event.target === lightbox) closeLightbox();
+    });
+
     window.addEventListener('keydown', (event) => {
+      const lightboxEl = $('#lightbox');
+      if (lightboxEl && !lightboxEl.hidden) {
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          closeLightbox();
+          return;
+        }
+        if (event.key === 'ArrowLeft') {
+          event.preventDefault();
+          moveLightbox(-1);
+          return;
+        }
+        if (event.key === 'ArrowRight') {
+          event.preventDefault();
+          moveLightbox(1);
+          return;
+        }
+      }
+
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         focusSearch();
@@ -1891,7 +1945,18 @@
         }
       }
 
-      if (event.key === 'Escape') closeSearch();
+      if (event.key === 'Escape') {
+        const popover = $('#searchPopover');
+        if (popover && !popover.hidden) {
+          closeSearch();
+          return;
+        }
+        if (state.view === 'game') {
+          closeDetail();
+          return;
+        }
+        closeSearch();
+      }
     });
 
     document.addEventListener(
@@ -1930,6 +1995,12 @@
         break;
       case 'open-steam':
         openUrl('https://store.steampowered.com/');
+        break;
+      case 'close-detail':
+        closeDetail();
+        break;
+      case 'retry-game':
+        if (state.detail?.id) openGame(state.detail.id);
         break;
       default:
         break;
