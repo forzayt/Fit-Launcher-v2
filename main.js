@@ -429,8 +429,26 @@ async function getGameDetails(appid, force = false) {
 
 async function getFitGirlDownloads(appid, force = false) {
   const game = await getGameDetails(appid, force);
-  const data = await getRepackDownloads(game.name, { force });
-  return { ...data, steamId: game.id, steamName: game.name };
+
+  try {
+    const data = await getRepackDownloads(game.name, { force });
+    return { ok: true, ...data, steamId: game.id, steamName: game.name };
+  } catch (error) {
+    if (error?.code === 'FITGIRL_NOT_FOUND' || error?.code === 'FITGIRL_NO_LINKS') {
+      return {
+        ok: false,
+        code: error.code,
+        message:
+          error.code === 'FITGIRL_NOT_FOUND'
+            ? `No FitGirl repack was found for "${game.name}".`
+            : `The FitGirl repack for "${game.name}" does not list any download links.`,
+        steamId: game.id,
+        steamName: game.name,
+        searchUrl: `https://fitgirl-repacks.site/?s=${encodeURIComponent(game.name)}`,
+      };
+    }
+    throw error;
+  }
 }
 
 async function getNewsData(appIds, force = false) {  const ids = [

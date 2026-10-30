@@ -23,7 +23,7 @@ const crypto = require('node:crypto');
 const SITE = 'https://fitgirl-repacks.site';
 const CACHE_TTL = 6 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT = 20000;
-const MAX_VARIANTS = 2;
+const MAX_VARIANTS = 4;
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -301,17 +301,25 @@ function scoreCandidate(candidate, gameTitle) {
   }
 
   const title = normalizeTitle(candidate.title);
-  let score = 0;
+  if (!title) return 0;
+
+  const targetTokens = target.split(' ').filter(Boolean);
+  const titleTokens = new Set(title.split(' ').filter(Boolean));
+  if (!targetTokens.length || !titleTokens.size) return 0;
+
+  const matchedTokens = targetTokens.filter((token) => titleTokens.has(token)).length;
+  const recall = matchedTokens / targetTokens.length;
+  if (recall < 0.7) return 0;
+
+  let score = Math.round(recall * 70);
 
   if (slug === target || title === target) score += 100;
   if (slug.startsWith(`${target} `)) score += 60;
   if (title.startsWith(`${target} `)) score += 50;
-  else if (title.includes(target)) score += 15;
-  else if (slug.includes(target)) score += 10;
-  else return 0;
+  else if (title.includes(target)) score += 20;
 
-  const extraTokens = Math.max(0, title.split(' ').length - target.split(' ').length);
-  score -= Math.min(20, extraTokens);
+  const extraTokens = Math.max(0, titleTokens.size - matchedTokens);
+  score -= Math.min(25, extraTokens * 0.5);
 
   // A repack post for a game with a colon in its own name (e.g. Batman: Arkham
   // Knight) should still win over a spin-off that merely shares the prefix.
@@ -336,24 +344,36 @@ function pickBestPost(results, gameTitle) {
   return bestScore > 0 ? best : null;
 }
 
+function stripEdition(value) {
+  return String(value || '')
+    .replace(/\([^)]*\)/g, ' ')
+    .replace(
+      /\b(deluxe|ultimate|definitive|premium|gold|complete|enhanced|remastered|legacy|classic|legendary|standard|special|game of the year|goty)\b(?:\s+edition)?\s*$/gi,
+      ' ',
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function titleVariants(gameTitle) {
   const variants = [];
   const add = (value) => {
-    const trimmed = String(value || '').trim();
+    const trimmed = String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim();
     if (trimmed.length >= 2 && !variants.includes(trimmed)) variants.push(trimmed);
   };
 
-  add(gameTitle);
-  add(String(gameTitle || '').split(/[:|\u2013\u2014]/)[0]);
-  add(
-    String(gameTitle || '')
-      .replace(
-        /\b(deluxe|ultimate|definitive|premium|gold|complete|enhanced|legendary|standard|special|game of the year|goty)\s+edition\b/gi,
-        '',
-      )
-      .replace(/\s+/g, ' ')
-      .trim(),
-  );
+  const base = String(gameTitle || '').trim();
+  add(base);
+  add(base.replace(/\([^)]*\)/g, ' ').trim());
+  add(base.split(/[:|\u2013\u2014]/)[0]);
+  add(stripEdition(base));
+
+  const strippedTokens = stripEdition(base).split(' ').filter(Boolean);
+  if (strippedTokens.length > 2) {
+    add(strippedTokens.slice(0, -1).join(' '));
+  }
 
   return variants.slice(0, MAX_VARIANTS);
 }

@@ -936,7 +936,9 @@
 
   function fitgirlErrorMarkup(message) {
     const name = state.detail?.data?.name || state.detail?.summary?.name || 'this game';
-    const searchUrl = `https://fitgirl-repacks.site/?s=${encodeURIComponent(name)}`;
+    const searchUrl =
+      state.detail?.fitgirl?.searchUrl ||
+      `https://fitgirl-repacks.site/?s=${encodeURIComponent(name)}`;
     return `
       <div class="fitgirl-state">
         <p>${escapeHtml(message || 'No repack downloads were found for this game.')}</p>
@@ -975,20 +977,36 @@
   async function loadFitGirl(id, requestId, force = false) {
     if (!state.detail) return;
 
-    state.detail.fitgirl = { loading: true, data: null, error: null };
+    state.detail.fitgirl = { loading: true, data: null, error: null, searchUrl: null };
     renderFitGirlSection();
 
     try {
       if (!api?.getFitGirlDownloads) throw new Error('The desktop bridge is unavailable.');
-      const data = await api.getFitGirlDownloads(id, force);
+      const result = await api.getFitGirlDownloads(id, force);
       if (requestId !== state.detailRequest) return;
-      state.detail.fitgirl = { loading: false, data, error: null };
+
+      if (result?.ok === false) {
+        state.detail.fitgirl = {
+          loading: false,
+          data: null,
+          error: result.message,
+          searchUrl: result.searchUrl || null,
+        };
+      } else {
+        state.detail.fitgirl = {
+          loading: false,
+          data: result,
+          error: null,
+          searchUrl: result?.searchUrl || null,
+        };
+      }
     } catch (error) {
       if (requestId !== state.detailRequest) return;
       state.detail.fitgirl = {
         loading: false,
         data: null,
         error: error?.message || 'Could not fetch repack downloads.',
+        searchUrl: null,
       };
     }
 
