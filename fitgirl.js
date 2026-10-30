@@ -577,6 +577,7 @@ async function findPost(gameTitle, appid = null) {
   const targetId = appid == null ? '' : String(appid).trim();
   const candidates = new Map();
   let lastError = null;
+  let searchOrder = 0;
 
   for (const variant of titleVariants(gameTitle)) {
     let results;
@@ -593,7 +594,13 @@ async function findPost(gameTitle, appid = null) {
       const existing = candidates.get(result.url);
 
       if (!existing) {
-        candidates.set(result.url, { ...result, score: titleScore, variantScore });
+        candidates.set(result.url, {
+          ...result,
+          score: titleScore,
+          variantScore,
+          order: searchOrder,
+        });
+        searchOrder += 1;
         continue;
       }
 
@@ -621,10 +628,18 @@ async function findPost(gameTitle, appid = null) {
     return null;
   }
 
-  // Without an app id there is nothing to verify, so keep the old title-only
-  // behaviour and avoid extra post requests.
-  if (!targetId) return ranked[0];
+  // Without an app id there is nothing to verify. Mirror the reference API and
+  // prefer the earliest relevant search result instead of the highest title
+  // score, which can favour an older edition with a similar name.
+  if (!targetId) {
+    const titleMatches = ranked.filter((candidate) => candidate.score > 0);
+    const pool = titleMatches.length ? titleMatches : ranked;
+    return pool.reduce((first, candidate) =>
+      candidate.order < first.order ? candidate : first,
+    );
+  }
 
+  const inspected = [];
   let best = null;
   let bestScore = -Infinity;
 
@@ -638,9 +653,13 @@ async function findPost(gameTitle, appid = null) {
     }
 
     const content = extractEntryContent(html);
-    const steamIds = extractSteamAppIds(content || html);
+    let steamIds = extractSteamAppIds(content);
+    if (!steamIds.size && content !== html) steamIds = extractSteamAppIds(html);
+
     const appidMatched = steamIds.has(targetId);
     const hasOtherIds = steamIds.size > 0 && !appidMatched;
+    const record = { ...candidate, html, steamIds: [...steamIds], appidMatched };
+    inspected.push(record);
 
     let score = candidate.score;
     if (appidMatched) score += TARGET_APPID_BONUS;
@@ -648,12 +667,24 @@ async function findPost(gameTitle, appid = null) {
 
     if (score > bestScore) {
       bestScore = score;
-      best = { ...candidate, html, steamIds: [...steamIds], appidMatched };
+      best = record;
     }
 
     // Candidates are sorted by title score, so the first app-id match is also
     // the best title match that actually belongs to this Steam game.
-    if (appidMatched) break;
+    if (appidMatched) return record;
+  }
+
+  // No post embedded the requested app id. Posts without any Steam id are the
+  // safest fallback: keep the reference API's first-result preference among
+  // them instead of choosing a post that explicitly belongs to another game.
+  const neutral = inspected.filter((candidate) => candidate.steamIds.length === 0);
+  if (neutral.length) {
+    const titleMatches = neutral.filter((candidate) => candidate.score > 0);
+    const pool = titleMatches.length ? titleMatches : neutral;
+    return pool.reduce((first, candidate) =>
+      candidate.order < first.order ? candidate : first,
+    );
   }
 
   if (best) return best;
