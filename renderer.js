@@ -419,6 +419,10 @@
           ${detailBuyLabel(data)}
           ${icon('external')}
         </button>
+        <button class="btn ghost full" type="button">
+          ${icon('download')}
+          Download
+        </button>
         <button
           class="btn ghost full${saved ? ' is-saved' : ''}"
           type="button"
@@ -1315,6 +1319,10 @@
                 <button class="btn primary" type="button" data-open-app="${escapeAttr(game.id)}">
                   ${primaryLabel}
                   ${icon('chevron-right')}
+                </button>
+                <button class="btn ghost" type="button">
+                  ${icon('download')}
+                  Download
                 </button>
                 <button
                   class="btn ghost${saved ? ' is-saved' : ''}"
