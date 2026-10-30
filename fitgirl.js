@@ -9,7 +9,8 @@
  *
  * Flow:
  *   1. Search fitgirl-repacks.site for the Steam game title.
- *   2. Pick the best matching post (slug/title scoring, skips update digests).
+ *   2. Pick the best matching post: verify candidates against the Steam app id
+ *      when possible, then fall back to slug/title scoring.
  *   3. Fetch the post and collect links from the download sections only.
  *   4. Group links by hoster (direct / torrent / game updates) for the UI.
  */
@@ -24,6 +25,22 @@ const SITE = 'https://fitgirl-repacks.site';
 const CACHE_TTL = 6 * 60 * 60 * 1000;
 const REQUEST_TIMEOUT = 20000;
 const MAX_VARIANTS = 4;
+const MAX_CANDIDATES_TO_INSPECT = 6;
+const TARGET_APPID_BONUS = 1000;
+const APPID_MISMATCH_PENALTY = 80;
+
+// FitGirl posts embed Steam artwork/trailers from a few CDN hostnames. The app
+// id in those URLs lets us verify that a candidate post belongs to the Steam
+// game the user opened, instead of trusting the title alone.
+const STEAM_APP_ID_PATTERNS = [
+  /steamstatic\.com\/steam\/apps\/(\d+)/gi,
+  /steamstatic\.com\/store_trailers\/(\d+)/gi,
+  /store\.steampowered\.com\/app\/(\d+)/gi,
+  /steamcommunity\.com\/app\/(\d+)/gi,
+  /steamcdn-a\.akamaihd\.net\/steam\/apps\/(\d+)/gi,
+  /steamdb\.info\/app\/(\d+)/gi,
+  /steam:\/\/[a-z]+\/(\d+)/gi,
+];
 
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ' +
@@ -289,6 +306,19 @@ function extractSearchResults(html) {
   return results;
 }
 
+function extractSteamAppIds(html) {
+  const ids = new Set();
+  const source = String(html || '');
+
+  for (const pattern of STEAM_APP_ID_PATTERNS) {
+    for (const match of source.matchAll(pattern)) {
+      if (match[1]) ids.add(match[1]);
+    }
+  }
+
+  return ids;
+}
+
 function scoreCandidate(candidate, gameTitle) {
   const target = normalizeTitle(gameTitle);
   if (!target) return 0;
@@ -369,11 +399,6 @@ function titleVariants(gameTitle) {
   add(base.replace(/\([^)]*\)/g, ' ').trim());
   add(base.split(/[:|\u2013\u2014]/)[0]);
   add(stripEdition(base));
-
-  const strippedTokens = stripEdition(base).split(' ').filter(Boolean);
-  if (strippedTokens.length > 2) {
-    add(strippedTokens.slice(0, -1).join(' '));
-  }
 
   return variants.slice(0, MAX_VARIANTS);
 }
@@ -548,21 +573,100 @@ async function searchPosts(query) {
   return extractSearchResults(html);
 }
 
-async function findPost(gameTitle) {
+async function findPost(gameTitle, appid = null) {
+  const targetId = appid == null ? '' : String(appid).trim();
+  const candidates = new Map();
+  let lastError = null;
+
   for (const variant of titleVariants(gameTitle)) {
-    const results = await searchPosts(variant);
-    const best = pickBestPost(results, gameTitle) || pickBestPost(results, variant);
-    if (best) return best;
+    let results;
+    try {
+      results = await searchPosts(variant);
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+
+    for (const result of results) {
+      const titleScore = scoreCandidate(result, gameTitle);
+      const variantScore = scoreCandidate(result, variant);
+      const existing = candidates.get(result.url);
+
+      if (!existing) {
+        candidates.set(result.url, { ...result, score: titleScore, variantScore });
+        continue;
+      }
+
+      existing.score = Math.max(existing.score, titleScore);
+      existing.variantScore = Math.max(existing.variantScore, variantScore);
+    }
   }
 
-  return null;
+  // Candidates matching the full title always come before candidates that only
+  // matched a broader search variant (for example "Batman" when the game is
+  // "Batman: Arkham Knight").
+  const primary = [];
+  const fallback = [];
+  for (const candidate of candidates.values()) {
+    if (candidate.score > 0) primary.push(candidate);
+    else if (candidate.variantScore > 0) fallback.push(candidate);
+  }
+
+  primary.sort((a, b) => b.score - a.score);
+  fallback.sort((a, b) => b.variantScore - a.variantScore);
+  const ranked = [...primary, ...fallback];
+
+  if (!ranked.length) {
+    if (lastError) throw lastError;
+    return null;
+  }
+
+  // Without an app id there is nothing to verify, so keep the old title-only
+  // behaviour and avoid extra post requests.
+  if (!targetId) return ranked[0];
+
+  let best = null;
+  let bestScore = -Infinity;
+
+  for (const candidate of ranked.slice(0, MAX_CANDIDATES_TO_INSPECT)) {
+    let html;
+    try {
+      html = await fetchText(candidate.url);
+    } catch (error) {
+      lastError = error;
+      continue;
+    }
+
+    const content = extractEntryContent(html);
+    const steamIds = extractSteamAppIds(content || html);
+    const appidMatched = steamIds.has(targetId);
+    const hasOtherIds = steamIds.size > 0 && !appidMatched;
+
+    let score = candidate.score;
+    if (appidMatched) score += TARGET_APPID_BONUS;
+    else if (hasOtherIds) score -= APPID_MISMATCH_PENALTY;
+
+    if (score > bestScore) {
+      bestScore = score;
+      best = { ...candidate, html, steamIds: [...steamIds], appidMatched };
+    }
+
+    // Candidates are sorted by title score, so the first app-id match is also
+    // the best title match that actually belongs to this Steam game.
+    if (appidMatched) break;
+  }
+
+  if (best) return best;
+  if (lastError) throw lastError;
+  return ranked[0];
 }
 
-async function getRepackDownloads(gameTitle, { force = false } = {}) {
+async function getRepackDownloads(gameTitle, { force = false, appid = null } = {}) {
   const title = String(gameTitle || '').trim();
   if (!title) throw new Error('A game title is required to search FitGirl.');
 
-  const cacheKey = normalizeTitle(title);
+  const targetId = appid == null ? '' : String(appid).trim();
+  const cacheKey = targetId ? `appid:${targetId}` : normalizeTitle(title);
 
   if (!force) {
     const cached = memoryCache.get(cacheKey);
@@ -575,14 +679,14 @@ async function getRepackDownloads(gameTitle, { force = false } = {}) {
     }
   }
 
-  const post = await findPost(title);
+  const post = await findPost(title, targetId);
   if (!post) {
     const error = new Error(`No FitGirl repack was found for "${title}".`);
     error.code = 'FITGIRL_NOT_FOUND';
     throw error;
   }
 
-  const html = await fetchText(post.url);
+  const html = post.html || (await fetchText(post.url));
   const content = extractEntryContent(html);
   const groups = content ? parseDownloads(content) : [];
   const total = groups.reduce((sum, group) => sum + group.links.length, 0);
@@ -595,7 +699,9 @@ async function getRepackDownloads(gameTitle, { force = false } = {}) {
 
   const data = {
     gameTitle: title,
+    appid: targetId || null,
     matchedTitle: post.title,
+    matchedBy: post.appidMatched ? 'appid' : 'title',
     postUrl: post.url,
     searchUrl: searchUrl(title),
     fetchedAt: Date.now(),
@@ -621,6 +727,7 @@ module.exports = {
   pickBestPost,
   parseDownloads,
   extractEntryContent,
+  extractSteamAppIds,
   searchUrl,
   normalizeTitle,
 };

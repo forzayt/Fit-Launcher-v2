@@ -538,7 +538,7 @@ async function getFitGirlDownloads(appid, force = false) {
   const game = await getGameDetails(appid, force);
 
   try {
-    const data = await getRepackDownloads(game.name, { force });
+    const data = await getRepackDownloads(game.name, { force, appid: game.id });
     return { ok: true, ...data, steamId: game.id, steamName: game.name };
   } catch (error) {
     if (error?.code === 'FITGIRL_NOT_FOUND' || error?.code === 'FITGIRL_NO_LINKS') {
