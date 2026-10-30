@@ -86,6 +86,12 @@
       <symbol id="i-close" viewBox="0 0 24 24">
         <path d="m6 6 12 12M18 6 6 18" />
       </symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24">
+        <path d="M4 7h16" />
+        <path d="M9 7V4.5h6V7" />
+        <path d="m6.5 7 1 13h9l1-13" />
+        <path d="M10 11v5M14 11v5" />
+      </symbol>
     </svg>
 
     <div class="app-shell">
@@ -145,7 +151,7 @@
           <button
             class="rail-btn"
             type="button"
-            data-toast="Settings are coming soon."
+            data-nav="settings"
             aria-label="Settings"
           >
             <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
@@ -322,6 +328,54 @@
                   Browse the store
                 </button>
               </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-settings" aria-label="Settings" hidden>
+            <header class="view-head">
+              <div>
+                <p class="eyebrow">Preferences</p>
+                <h1>Settings</h1>
+              </div>
+            </header>
+
+            <div class="settings-layout">
+              <aside class="settings-sidebar" aria-label="Settings sections">
+                <button
+                  class="settings-nav-btn is-active"
+                  type="button"
+                  aria-current="page"
+                >
+                  <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>
+                  <span>Clear cache</span>
+                </button>
+              </aside>
+
+              <section class="settings-panel" aria-labelledby="settingsCacheTitle">
+                <header class="settings-panel-head">
+                  <h2 id="settingsCacheTitle">Clear cache</h2>
+                  <p>Remove cached Steam store data and FitGirl repack results from this device.</p>
+                </header>
+
+                <div class="settings-cache-row">
+                  <div class="settings-cache-info">
+                    <span class="settings-label">Current cache size</span>
+                    <strong class="settings-cache-size" id="cacheSizeLabel">Calculating…</strong>
+                    <span class="settings-cache-files" id="cacheFilesLabel"></span>
+                  </div>
+                  <button
+                    class="btn danger"
+                    type="button"
+                    id="clearCacheBtn"
+                    data-action="clear-cache"
+                  >
+                    <svg class="icon" aria-hidden="true"><use href="#i-trash"></use></svg>
+                    <span data-clear-label>Clear cache</span>
+                  </button>
+                </div>
+
+                <p class="settings-path" id="cachePathLabel"></p>
+              </section>
             </div>
           </section>
 

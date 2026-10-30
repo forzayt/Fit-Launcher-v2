@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
-const { getRepackDownloads } = require('./fitgirl');
+const { getRepackDownloads, clearMemoryCache: clearFitGirlMemoryCache } = require('./fitgirl');
 
 const STEAM_API = {
   categories: 'https://store.steampowered.com/api/featuredcategories?cc=us&l=english',
@@ -30,8 +30,63 @@ const searchCache = new Map();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+function cacheDirectory() {
+  return path.join(app.getPath('userData'), 'cache');
+}
+
 function cachePath(name) {
-  return path.join(app.getPath('userData'), 'cache', name);
+  return path.join(cacheDirectory(), name);
+}
+
+async function directoryStats(directory) {
+  const stats = { bytes: 0, files: 0 };
+  let entries;
+
+  try {
+    entries = await fs.readdir(directory, { withFileTypes: true });
+  } catch {
+    return stats;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      const entryPath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        const nested = await directoryStats(entryPath);
+        stats.bytes += nested.bytes;
+        stats.files += nested.files;
+        return;
+      }
+      if (!entry.isFile()) return;
+
+      try {
+        const file = await fs.stat(entryPath);
+        stats.bytes += file.size;
+        stats.files += 1;
+      } catch {
+        /* the file may disappear while we are measuring the cache */
+      }
+    }),
+  );
+
+  return stats;
+}
+
+async function getCacheInfo() {
+  const directory = cacheDirectory();
+  const stats = await directoryStats(directory);
+  return { ...stats, path: directory };
+}
+
+async function clearAppCache() {
+  homeCache = null;
+  newsCache.clear();
+  gameCache.clear();
+  searchCache.clear();
+  clearFitGirlMemoryCache();
+
+  await fs.rm(cacheDirectory(), { recursive: true, force: true });
+  return getCacheInfo();
 }
 
 async function readCache(name) {
@@ -617,6 +672,8 @@ app.whenReady().then(() => {
   ipcMain.handle('fitgirl:getDownloads', (_event, appid, force) =>
     getFitGirlDownloads(appid, Boolean(force)),
   );
+  ipcMain.handle('settings:getCacheInfo', () => getCacheInfo());
+  ipcMain.handle('settings:clearCache', () => clearAppCache());
   ipcMain.handle('shell:openExternal', (_event, url) => openExternal(url));
 
   createWindow();

@@ -610,8 +610,13 @@ async function getRepackDownloads(gameTitle, { force = false } = {}) {
   return data;
 }
 
+function clearMemoryCache() {
+  memoryCache.clear();
+}
+
 module.exports = {
   getRepackDownloads,
+  clearMemoryCache,
   searchPosts,
   pickBestPost,
   parseDownloads,

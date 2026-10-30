@@ -1718,6 +1718,85 @@
     }
   }
 
+  function formatBytes(bytes) {
+    const value = Math.max(0, Number(bytes) || 0);
+    if (value < 1024) return `${value} B`;
+
+    const units = ['KB', 'MB', 'GB', 'TB'];
+    let size = value / 1024;
+    let unit = 0;
+
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit += 1;
+    }
+
+    const formatted = size >= 100 ? size.toFixed(0) : size.toFixed(1);
+    return `${formatted} ${units[unit]}`;
+  }
+
+  async function loadCacheInfo() {
+    const sizeLabel = $('#cacheSizeLabel');
+    const filesLabel = $('#cacheFilesLabel');
+    const pathLabel = $('#cachePathLabel');
+    if (!sizeLabel) return;
+
+    sizeLabel.textContent = 'Calculating…';
+    sizeLabel.removeAttribute('title');
+    if (filesLabel) filesLabel.textContent = '';
+    if (pathLabel) pathLabel.textContent = '';
+
+    try {
+      if (!api?.getCacheInfo) throw new Error('The desktop bridge is unavailable.');
+      const info = await api.getCacheInfo();
+      const bytes = Math.max(0, Number(info?.bytes) || 0);
+      const files = Math.max(0, Number(info?.files) || 0);
+
+      sizeLabel.textContent = formatBytes(bytes);
+      sizeLabel.title = `${bytes.toLocaleString()} bytes`;
+      if (filesLabel) {
+        filesLabel.textContent = `${files} ${files === 1 ? 'file' : 'files'} cached`;
+      }
+      if (pathLabel) pathLabel.textContent = info?.path || '';
+    } catch (error) {
+      sizeLabel.textContent = 'Unavailable';
+      if (pathLabel) {
+        pathLabel.textContent = error?.message || 'Could not read the cache size.';
+      }
+    }
+  }
+
+  async function clearCache() {
+    const button = $('#clearCacheBtn');
+    const label = button?.querySelector('[data-clear-label]');
+
+    if (!api?.clearCache) {
+      showToast('Desktop bridge unavailable.');
+      return;
+    }
+    if (button?.disabled) return;
+
+    if (button) {
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+    }
+    if (label) label.textContent = 'Clearing…';
+
+    try {
+      await api.clearCache();
+      showToast('Cache cleared');
+      await loadCacheInfo();
+    } catch {
+      showToast('Could not clear the cache.');
+    } finally {
+      if (button) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+      }
+      if (label) label.textContent = 'Clear cache';
+    }
+  }
+
   function newsCard(article) {
     const game = state.catalog.get(String(article.appid));
     const image = game?.headerImage || game?.image || '';
@@ -1853,7 +1932,7 @@
   }
 
   function setView(name) {
-    const allowed = ['discover', 'browse', 'news', 'wishlist', 'library', 'game'];
+    const allowed = ['discover', 'browse', 'news', 'wishlist', 'library', 'game', 'settings'];
     if (!allowed.includes(name)) return;
 
     state.view = name;
@@ -1882,6 +1961,7 @@
     if (name === 'browse') renderBrowse();
     if (name === 'wishlist') renderWishlist();
     if (name === 'news') loadNews();
+    if (name === 'settings') loadCacheInfo();
     if (name === 'discover') startHeroAuto();
     else stopHeroAuto();
 
@@ -2301,6 +2381,9 @@
         break;
       case 'refresh-fitgirl':
         if (state.detail?.id) loadFitGirl(state.detail.id, state.detailRequest, true);
+        break;
+      case 'clear-cache':
+        clearCache();
         break;
       default:
         break;
