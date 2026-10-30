@@ -35,6 +35,9 @@
     lightboxIndex: 0,
     searchIndex: -1,
     searchResults: [],
+    searchTimer: null,
+    searchRequest: 0,
+    searchLoading: false,
   };
 
   const toast = $('#toast');
@@ -1876,6 +1879,10 @@
   function closeSearch() {
     const popover = $('#searchPopover');
     const input = $('#searchInput');
+    state.searchRequest += 1;
+    clearTimeout(state.searchTimer);
+    state.searchTimer = null;
+    state.searchLoading = false;
     if (popover) {
       popover.hidden = true;
       popover.innerHTML = '';
@@ -1903,6 +1910,47 @@
     `;
   }
 
+  function localSearchMatches(query, limit = 6) {
+    const term = query.toLocaleLowerCase();
+    const tokens = term.split(/\s+/).filter(Boolean);
+
+    return [...state.catalog.values()]
+      .map((game) => {
+        const name = game.name.toLocaleLowerCase();
+        return {
+          game,
+          starts: name.startsWith(term) ? 0 : 1,
+          matchesAllTokens: tokens.every((token) => name.includes(token)),
+        };
+      })
+      .filter((entry) => entry.matchesAllTokens)
+      .sort((a, b) => a.starts - b.starts || a.game.name.localeCompare(b.game.name))
+      .slice(0, limit)
+      .map((entry) => entry.game);
+  }
+
+  function mergeSearchResults(local, remote) {
+    const seen = new Set();
+    const merged = [];
+
+    for (const game of [...(local || []), ...(remote || [])]) {
+      const id = String(game?.id || '');
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      merged.push(game);
+      if (merged.length >= 8) break;
+    }
+
+    return merged;
+  }
+
+  function searchEmptyMarkup(query, loading) {
+    if (loading) {
+      return '<div class="search-empty is-loading">Searching Steam…</div>';
+    }
+    return `<div class="search-empty">No games match “${escapeHtml(query)}”.</div>`;
+  }
+
   function renderSearchResults(rawQuery) {
     const popover = $('#searchPopover');
     const input = $('#searchInput');
@@ -1910,29 +1958,55 @@
 
     const query = String(rawQuery || '').trim();
     state.searchIndex = -1;
+    state.searchRequest += 1;
+    const requestId = state.searchRequest;
+    clearTimeout(state.searchTimer);
+    state.searchTimer = null;
 
     if (query.length < 2) {
       closeSearch();
       return;
     }
 
-    const term = query.toLocaleLowerCase();
-    const matches = [...state.catalog.values()]
-      .filter((game) => game.name.toLocaleLowerCase().includes(term))
-      .sort((a, b) => {
-        const aStarts = a.name.toLocaleLowerCase().startsWith(term) ? 0 : 1;
-        const bStarts = b.name.toLocaleLowerCase().startsWith(term) ? 0 : 1;
-        return aStarts - bStarts || a.name.localeCompare(b.name);
-      })
-      .slice(0, 7);
+    const local = localSearchMatches(query);
+    state.searchResults = local;
+    state.searchLoading = true;
 
-    state.searchResults = matches;
-
-    popover.innerHTML = matches.length
-      ? matches.map((game) => searchResultMarkup(game)).join('')
-      : `<div class="search-empty">No games match “${escapeHtml(query)}”.</div>`;
+    popover.innerHTML = local.length
+      ? local.map((game) => searchResultMarkup(game)).join('')
+      : searchEmptyMarkup(query, true);
     popover.hidden = false;
     input.setAttribute('aria-expanded', 'true');
+
+    if (!api?.searchStore) {
+      state.searchLoading = false;
+      popover.innerHTML = local.length
+        ? local.map((game) => searchResultMarkup(game)).join('')
+        : searchEmptyMarkup(query, false);
+      return;
+    }
+
+    state.searchTimer = setTimeout(async () => {
+      try {
+        const remote = await api.searchStore(query);
+        if (requestId !== state.searchRequest) return;
+
+        const merged = mergeSearchResults(local, remote);
+        state.searchResults = merged;
+        state.searchLoading = false;
+        state.searchIndex = -1;
+
+        popover.innerHTML = merged.length
+          ? merged.map((game) => searchResultMarkup(game)).join('')
+          : searchEmptyMarkup(query, false);
+      } catch {
+        if (requestId !== state.searchRequest) return;
+        state.searchLoading = false;
+        if (!local.length) {
+          popover.innerHTML = searchEmptyMarkup(query, false);
+        }
+      }
+    }, 220);
   }
 
   function applySearchFocus() {

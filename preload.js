@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('fitLauncher', {
   getHome: (force = false) => ipcRenderer.invoke('store:getHome', force),
   getNews: (appIds, force = false) => ipcRenderer.invoke('store:getNews', appIds, force),
   getGame: (appid, force = false) => ipcRenderer.invoke('store:getGame', appid, force),
+  searchStore: (term) => ipcRenderer.invoke('store:search', term),
   getFitGirlDownloads: (appid, force = false) =>
     ipcRenderer.invoke('fitgirl:getDownloads', appid, force),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),

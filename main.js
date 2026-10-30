@@ -6,6 +6,8 @@ const { getRepackDownloads } = require('./fitgirl');
 const STEAM_API = {
   categories: 'https://store.steampowered.com/api/featuredcategories?cc=us&l=english',
   featured: 'https://store.steampowered.com/api/featured?cc=us&l=english',
+  search: (term) =>
+    `https://store.steampowered.com/api/storesearch/?term=${encodeURIComponent(term)}&l=english&cc=us`,
   appDetails: (id) =>
     `https://store.steampowered.com/api/appdetails?appids=${id}&cc=us&l=english`,
   news: (id) =>
@@ -18,11 +20,13 @@ const FREE_TO_PLAY_IDS = [
 
 const CACHE_TTL = 30 * 60 * 1000;
 const NEWS_TTL = 15 * 60 * 1000;
+const SEARCH_TTL = 10 * 60 * 1000;
 
 let homeCache = null;
 let homeRequest = null;
 const newsCache = new Map();
 const gameCache = new Map();
+const searchCache = new Map();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -136,8 +140,49 @@ function normalizeItem(item) {
   };
 }
 
-async function getAppDetails(appid) {
-  try {
+function normalizeSearchItem(item) {
+  const price = item.price || {};
+  const image = item.tiny_image || '';
+
+  return {
+    id: String(item.id),
+    name: item.name,
+    image,
+    headerImage: image,
+    capsule: image,
+    discount: 0,
+    originalPrice: typeof price.initial === 'number' ? price.initial : null,
+    finalPrice: typeof price.final === 'number' ? price.final : null,
+    currency: price.currency || 'USD',
+    discountExpires: null,
+    url: appUrl(item.id),
+    description: '',
+    genres: [],
+    developer: '',
+    releaseDate: '',
+    isFree: price.final === 0,
+  };
+}
+
+async function searchSteamStore(term) {
+  const query = String(term || '').trim();
+  if (query.length < 2) return [];
+
+  const key = query.toLocaleLowerCase();
+  const cached = searchCache.get(key);
+  if (cached && Date.now() - cached.fetchedAt < SEARCH_TTL) return cached.items;
+
+  const payload = await fetchJson(STEAM_API.search(query), { retries: 1 });
+  const items = (payload?.items || [])
+    .filter((item) => item && item.id && item.name)
+    .slice(0, 12)
+    .map(normalizeSearchItem);
+
+  searchCache.set(key, { fetchedAt: Date.now(), items });
+  return items;
+}
+
+async function getAppDetails(appid) {  try {
     const payload = await fetchJson(STEAM_API.appDetails(appid), { retries: 2 });
     const entry = payload?.[String(appid)];
     return entry?.success ? entry.data : null;
@@ -562,6 +607,7 @@ app.whenReady().then(() => {
   ipcMain.handle('store:getGame', (_event, appid, force) =>
     getGameDetails(appid, Boolean(force)),
   );
+  ipcMain.handle('store:search', (_event, term) => searchSteamStore(term));
   ipcMain.handle('fitgirl:getDownloads', (_event, appid, force) =>
     getFitGirlDownloads(appid, Boolean(force)),
   );
