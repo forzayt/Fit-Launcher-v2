@@ -393,44 +393,6 @@ function createWindow() {
   win.loadFile('index.html');
   win.setMenuBarVisibility(false);
 
-  if (process.env.FIT_CAPTURE) {
-    win.webContents.once('did-finish-load', async () => {
-      await win.webContents.executeJavaScript(`
-        new Promise((resolve) => {
-          const started = Date.now();
-          const timer = setInterval(() => {
-            const ready = document.querySelector('.hero-slide');
-            if (ready || Date.now() - started > 25000) {
-              clearInterval(timer);
-              resolve(Boolean(ready));
-            }
-          }, 250);
-        })
-      `);
-      await new Promise((resolve) => setTimeout(resolve, 2500));
-      const captureView = process.env.FIT_CAPTURE_VIEW;
-      if (captureView && ['browse', 'news', 'wishlist', 'library'].includes(captureView)) {
-        await win.webContents.executeJavaScript(`
-          (async () => {
-            const button = document.querySelector('[data-tab="${captureView}"]') ||
-              document.querySelector('[data-nav="${captureView}"]');
-            if (button) button.click();
-            await new Promise((resolve) => setTimeout(resolve, 4500));
-            return true;
-          })()
-        `);
-      }
-      try {
-        const image = await win.webContents.capturePage();
-        await fs.writeFile(process.env.FIT_CAPTURE, image.toPNG());
-        console.log('CAPTURED', process.env.FIT_CAPTURE);
-      } catch (error) {
-        console.error('CAPTURE FAILED', error);
-      }
-      app.quit();
-    });
-  }
-
   win.webContents.setWindowOpenHandler(({ url }) => {
     openExternal(url);
     return { action: 'deny' };
