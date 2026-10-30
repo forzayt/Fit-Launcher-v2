@@ -44,8 +44,9 @@ async function directoryStats(directory) {
 
   try {
     entries = await fs.readdir(directory, { withFileTypes: true });
-  } catch {
-    return stats;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return stats;
+    throw error;
   }
 
   await Promise.all(
