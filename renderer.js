@@ -593,10 +593,6 @@
       data.background ||
       data.screenshots?.[0]?.full ||
       data.headerImage;
-    const priceView = {
-      ...data,
-      comingSoon: Boolean(data.releaseDate?.comingSoon && !data.price),
-    };
     const meta = [];
     if (data.genres?.length) meta.push(...data.genres.slice(0, 2));
     if (data.developers?.length) meta.push(data.developers[0]);
@@ -947,7 +943,7 @@
     const image = $('#lightboxImage');
     if (!lightbox) return;
     lightbox.hidden = true;
-    if (image) image.src = '';
+    if (image) image.removeAttribute('src');
     document.body.classList.remove('lightbox-open');
   }
 
@@ -1102,7 +1098,7 @@
               <div class="hero-actions">
                 <button class="btn primary" type="button" data-open-app="${escapeAttr(game.id)}">
                   ${primaryLabel}
-                  ${icon('external')}
+                  ${icon('chevron-right')}
                 </button>
                 <button
                   class="btn ghost${saved ? ' is-saved' : ''}"
@@ -1653,9 +1649,9 @@
     $$('.rail-btn[data-nav]').forEach((button) => {
       const target = button.dataset.nav;
       const active =
-        target === name ||
+        target === tabContext ||
         (target === 'discover' &&
-          ['discover', 'browse', 'news', 'game'].includes(name));
+          ['discover', 'browse', 'news'].includes(tabContext));
       button.classList.toggle('is-active', active);
     });
 

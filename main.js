@@ -109,6 +109,10 @@ function cleanText(value, maxLength = 0) {
   return text;
 }
 
+function secureUrl(value) {
+  return String(value || '').replace(/^http:\/\//i, 'https://');
+}
+
 function appUrl(id) {
   return `https://store.steampowered.com/app/${id}/`;
 }
@@ -326,17 +330,17 @@ function normalizeGameDetails(raw) {
   const screenshots = (raw.screenshots || [])
     .filter((shot) => shot?.path_full)
     .map((shot) => ({
-      thumb: shot.path_thumbnail || shot.path_full,
-      full: shot.path_full,
+      thumb: secureUrl(shot.path_thumbnail || shot.path_full),
+      full: secureUrl(shot.path_full),
     }));
 
   const movies = (raw.movies || [])
     .map((movie) => ({
       id: movie.id,
       name: cleanText(movie.name, 120) || 'Trailer',
-      thumbnail: movie.thumbnail || '',
-      mp4: movie.mp4?.max || movie.mp4?.['480'] || '',
-      webm: movie.webm?.max || movie.webm?.['480'] || '',
+      thumbnail: secureUrl(movie.thumbnail),
+      mp4: secureUrl(movie.mp4?.max || movie.mp4?.['480']),
+      webm: secureUrl(movie.webm?.max || movie.webm?.['480']),
     }))
     .filter((movie) => movie.mp4 || movie.webm);
 
@@ -357,10 +361,10 @@ function normalizeGameDetails(raw) {
     aboutTheGame: raw.about_the_game || '',
     detailedDescription: raw.detailed_description || '',
     supportedLanguages: raw.supported_languages || '',
-    headerImage: raw.header_image || '',
-    capsuleImage: raw.capsule_image || '',
-    background: raw.background || '',
-    backgroundRaw: raw.background_raw || '',
+    headerImage: secureUrl(raw.header_image),
+    capsuleImage: secureUrl(raw.capsule_image),
+    background: secureUrl(raw.background),
+    backgroundRaw: secureUrl(raw.background_raw),
     website: raw.website || '',
     developers: raw.developers || [],
     publishers: raw.publishers || [],
