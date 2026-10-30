@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell, screen } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
+const { getRepackDownloads } = require('./fitgirl');
 
 const STEAM_API = {
   categories: 'https://store.steampowered.com/api/featuredcategories?cc=us&l=english',
@@ -426,8 +427,13 @@ async function getGameDetails(appid, force = false) {
   return data;
 }
 
-async function getNewsData(appIds, force = false) {
-  const ids = [
+async function getFitGirlDownloads(appid, force = false) {
+  const game = await getGameDetails(appid, force);
+  const data = await getRepackDownloads(game.name, { force });
+  return { ...data, steamId: game.id, steamName: game.name };
+}
+
+async function getNewsData(appIds, force = false) {  const ids = [
     ...new Set(
       (Array.isArray(appIds) ? appIds : [])
         .map((id) => Number(id))
@@ -515,6 +521,11 @@ function createWindow() {
 async function openExternal(rawUrl) {
   try {
     const url = new URL(rawUrl);
+    if (url.protocol === 'magnet:') {
+      if (!url.searchParams.has('xt')) return false;
+      await shell.openExternal(url.toString());
+      return true;
+    }
     if (!['https:', 'http:'].includes(url.protocol)) return false;
     await shell.openExternal(url.toString());
     return true;
@@ -532,6 +543,9 @@ app.whenReady().then(() => {
   );
   ipcMain.handle('store:getGame', (_event, appid, force) =>
     getGameDetails(appid, Boolean(force)),
+  );
+  ipcMain.handle('fitgirl:getDownloads', (_event, appid, force) =>
+    getFitGirlDownloads(appid, Boolean(force)),
   );
   ipcMain.handle('shell:openExternal', (_event, url) => openExternal(url));
 

@@ -783,6 +783,7 @@
                 </section>`
               : ''
           }
+          ${fitgirlSectionMarkup()}
           ${screenshotsMarkup}
           ${moviesMarkup}
           ${requirementsMarkup(data)}
@@ -839,8 +840,7 @@
     `;
   }
 
-  function renderDetailLoading() {
-    const mount = $('#gameDetailMount');
+  function renderDetailLoading() {    const mount = $('#gameDetailMount');
     if (!mount) return;
 
     mount.innerHTML = `
