@@ -1163,7 +1163,7 @@
     openLightbox(state.lightboxIndex + direction);
   }
 
-  async function openGame(id) {
+  async function openGame(id, summaryOverride = null) {
     const key = String(id);
     if (state.view !== 'game') {
       state.detailOrigin = { view: state.view, scrollY: window.scrollY };
@@ -1171,7 +1171,11 @@
       state.detailOrigin = { view: 'discover', scrollY: 0 };
     }
 
-    const summary = state.catalog.get(key) || null;
+    let summary = state.catalog.get(key) || summaryOverride || null;
+    if (summary && !state.catalog.has(key)) {
+      addGame(summary, null);
+      summary = state.catalog.get(key) || summary;
+    }
     const requestId = ++state.detailRequest;
 
     state.detail = {
@@ -2046,8 +2050,12 @@
       const openApp = target.closest('[data-open-app]');
       if (openApp) {
         event.preventDefault();
+        const searchHit =
+          state.searchResults.find(
+            (game) => String(game.id) === String(openApp.dataset.openApp),
+          ) || null;
         closeSearch();
-        openGame(openApp.dataset.openApp);
+        openGame(openApp.dataset.openApp, searchHit);
         return;
       }
 
@@ -2148,7 +2156,6 @@
     });
 
     const searchInput = $('#searchInput');
-    const searchPopover = $('#searchPopover');
 
     searchInput?.addEventListener('input', (event) => {
       renderSearchResults(event.target.value);
@@ -2177,15 +2184,11 @@
         const game = state.searchResults[index];
         closeSearch();
         searchInput.blur();
-        openGame(game.id);
+        openGame(game.id, game);
       } else if (event.key === 'Escape') {
         closeSearch();
         searchInput.blur();
       }
-    });
-
-    searchPopover?.addEventListener('click', (event) => {
-      if (event.target.closest('[data-open-app]')) closeSearch();
     });
 
     const lightbox = $('#lightbox');

@@ -143,6 +143,12 @@ function normalizeItem(item) {
 function normalizeSearchItem(item) {
   const price = item.price || {};
   const image = item.tiny_image || '';
+  const originalPrice = typeof price.initial === 'number' ? price.initial : null;
+  const finalPrice = typeof price.final === 'number' ? price.final : null;
+  const discount =
+    typeof originalPrice === 'number' && typeof finalPrice === 'number' && originalPrice > finalPrice
+      ? Math.round(((originalPrice - finalPrice) / originalPrice) * 100)
+      : 0;
 
   return {
     id: String(item.id),
@@ -150,9 +156,9 @@ function normalizeSearchItem(item) {
     image,
     headerImage: image,
     capsule: image,
-    discount: 0,
-    originalPrice: typeof price.initial === 'number' ? price.initial : null,
-    finalPrice: typeof price.final === 'number' ? price.final : null,
+    discount,
+    originalPrice,
+    finalPrice,
     currency: price.currency || 'USD',
     discountExpires: null,
     url: appUrl(item.id),
@@ -160,7 +166,7 @@ function normalizeSearchItem(item) {
     genres: [],
     developer: '',
     releaseDate: '',
-    isFree: price.final === 0,
+    isFree: finalPrice === 0,
   };
 }
 

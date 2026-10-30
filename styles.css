@@ -585,6 +585,24 @@ input:focus-visible,
   text-align: center;
 }
 
+.search-empty.is-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.search-empty.is-loading::before {
+  content: "";
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+  border: 2px solid #33333f;
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: fitgirl-spin 800ms linear infinite;
+}
+
 .icon-btn {
   position: relative;
   width: 38px;
