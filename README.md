@@ -1,5 +1,7 @@
 # Fit Launcher v2
 
+![Fit Launcher preview](preview.png)
+
 An Electron storefront prototype for browsing Steam games and finding FitGirl repack downloads.
 
 ## Features
