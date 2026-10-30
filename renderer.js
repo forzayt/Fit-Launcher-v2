@@ -840,6 +840,195 @@
     `;
   }
 
+  function fitgirlLoadingMarkup() {
+    return `
+      <div class="fitgirl-loading" role="status">
+        <span>Searching FitGirl for this repack…</span>
+      </div>
+    `;
+  }
+
+  function fitgirlSectionMarkup() {
+    return `
+      <section class="detail-section fitgirl-section" id="fitgirlSection">
+        <div class="detail-section-head">
+          <h2 class="detail-section-title">Repack downloads</h2>
+          <span class="detail-section-count">FitGirl</span>
+        </div>
+        <div id="fitgirlBody">${fitgirlLoadingMarkup()}</div>
+      </section>
+    `;
+  }
+
+  function fitgirlLinkMarkup(link) {
+    const host = link.magnet ? 'magnet' : link.host || hostLabel(link.url);
+    return `
+      <button
+        class="fitgirl-link"
+        type="button"
+        data-open-url="${escapeAttr(link.url)}"
+        title="${escapeAttr(link.url)}"
+      >
+        <span class="fitgirl-link-name">${escapeHtml(link.name || host)}</span>
+        <span class="fitgirl-link-host">${escapeHtml(host)}</span>
+        ${icon('external')}
+      </button>
+    `;
+  }
+
+  function fitgirlGroupMarkup(group, index) {
+    const kindLabel =
+      group.kind === 'torrent' ? 'Torrent' : group.kind === 'update' ? 'Update' : 'Direct';
+    return `
+      <details class="fitgirl-group"${index === 0 ? ' open' : ''}>
+        <summary class="fitgirl-group-head">
+          <span class="fitgirl-host">${escapeHtml(group.label)}</span>
+          <span class="fitgirl-meta">
+            <span class="fitgirl-kind ${escapeAttr(group.kind)}">${kindLabel}</span>
+            <span class="fitgirl-count">${group.links.length}</span>
+            ${icon('chevron-right')}
+          </span>
+        </summary>
+        <div class="fitgirl-links">
+          ${group.links.map((link) => fitgirlLinkMarkup(link)).join('')}
+        </div>
+        <div class="fitgirl-group-actions">
+          <button
+            class="btn ghost small"
+            type="button"
+            data-fitgirl-copy="${escapeAttr(group.id)}"
+          >
+            Copy ${group.links.length} links
+          </button>
+        </div>
+      </details>
+    `;
+  }
+
+  function fitgirlDataMarkup(data) {
+    const groups = data.groups || [];
+    return `
+      <div class="fitgirl-summary">
+        <div class="fitgirl-summary-copy">
+          <strong>${escapeHtml(data.matchedTitle || data.gameTitle || 'FitGirl repack')}</strong>
+          <span>
+            ${data.total} links · ${groups.length} ${groups.length === 1 ? 'host' : 'hosts'}
+          </span>
+        </div>
+        <div class="fitgirl-summary-actions">
+          <button class="btn ghost small" type="button" data-open-url="${escapeAttr(data.postUrl)}">
+            Repack page ${icon('external')}
+          </button>
+          <button class="btn ghost small" type="button" data-action="refresh-fitgirl">
+            ${icon('refresh')} Refresh
+          </button>
+        </div>
+      </div>
+      <p class="fitgirl-disclaimer">
+        Unofficial links scraped from fitgirl-repacks.site. The launcher does not host or verify
+        these files.
+      </p>
+      <div class="fitgirl-groups">
+        ${groups.map((group, index) => fitgirlGroupMarkup(group, index)).join('')}
+      </div>
+    `;
+  }
+
+  function fitgirlErrorMarkup(message) {
+    const name = state.detail?.data?.name || state.detail?.summary?.name || 'this game';
+    const searchUrl = `https://fitgirl-repacks.site/?s=${encodeURIComponent(name)}`;
+    return `
+      <div class="fitgirl-state">
+        <p>${escapeHtml(message || 'No repack downloads were found for this game.')}</p>
+        <div class="fitgirl-state-actions">
+          <button class="btn ghost small" type="button" data-action="refresh-fitgirl">
+            ${icon('refresh')} Try again
+          </button>
+          <button class="btn ghost small" type="button" data-open-url="${escapeAttr(searchUrl)}">
+            Search on FitGirl ${icon('external')}
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  function renderFitGirlSection() {
+    const body = $('#fitgirlBody');
+    if (!body) return;
+
+    const fitgirl = state.detail?.fitgirl;
+    if (!fitgirl || fitgirl.loading) {
+      body.innerHTML = fitgirlLoadingMarkup();
+      return;
+    }
+    if (fitgirl.error) {
+      body.innerHTML = fitgirlErrorMarkup(fitgirl.error);
+      return;
+    }
+    if (!fitgirl.data?.groups?.length) {
+      body.innerHTML = fitgirlErrorMarkup('No download links were found for this game.');
+      return;
+    }
+    body.innerHTML = fitgirlDataMarkup(fitgirl.data);
+  }
+
+  async function loadFitGirl(id, requestId, force = false) {
+    if (!state.detail) return;
+
+    state.detail.fitgirl = { loading: true, data: null, error: null };
+    renderFitGirlSection();
+
+    try {
+      if (!api?.getFitGirlDownloads) throw new Error('The desktop bridge is unavailable.');
+      const data = await api.getFitGirlDownloads(id, force);
+      if (requestId !== state.detailRequest) return;
+      state.detail.fitgirl = { loading: false, data, error: null };
+    } catch (error) {
+      if (requestId !== state.detailRequest) return;
+      state.detail.fitgirl = {
+        loading: false,
+        data: null,
+        error: error?.message || 'Could not fetch repack downloads.',
+      };
+    }
+
+    renderFitGirlSection();
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      /* fall through to the legacy clipboard path */
+    }
+
+    try {
+      const area = document.createElement('textarea');
+      area.value = text;
+      area.setAttribute('readonly', '');
+      area.style.position = 'fixed';
+      area.style.opacity = '0';
+      document.body.appendChild(area);
+      area.select();
+      const copied = document.execCommand('copy');
+      area.remove();
+      return copied;
+    } catch {
+      return false;
+    }
+  }
+
+  async function copyFitGirlGroup(groupId) {
+    const group = state.detail?.fitgirl?.data?.groups?.find((entry) => entry.id === groupId);
+    if (!group) return;
+
+    const copied = await copyText(group.links.map((link) => link.url).join('\n'));
+    showToast(
+      copied ? `Copied ${group.links.length} ${group.label} links` : 'Could not copy links.',
+    );
+  }
+
   function renderDetailLoading() {    const mount = $('#gameDetailMount');
     if (!mount) return;
 
@@ -988,9 +1177,11 @@
         loading: false,
         error: null,
         reqTab: pickRequirementTab(data),
+        fitgirl: { loading: true, data: null, error: null },
       };
       renderGameDetail();
       updateWishlistUI();
+      loadFitGirl(key, requestId);
     } catch (error) {
       if (requestId !== state.detailRequest) return;
       state.detail = {
@@ -1775,6 +1966,13 @@
         return;
       }
 
+      const fitgirlCopy = target.closest('[data-fitgirl-copy]');
+      if (fitgirlCopy) {
+        event.preventDefault();
+        copyFitGirlGroup(fitgirlCopy.dataset.fitgirlCopy);
+        return;
+      }
+
       const browseFilter = target.closest('[data-browse-filter]');
       if (browseFilter) {
         state.browseFilter = browseFilter.dataset.browseFilter;
@@ -1997,6 +2195,9 @@
         break;
       case 'retry-game':
         if (state.detail?.id) openGame(state.detail.id);
+        break;
+      case 'refresh-fitgirl':
+        if (state.detail?.id) loadFitGirl(state.detail.id, state.detailRequest, true);
         break;
       default:
         break;
