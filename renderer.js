@@ -29,6 +29,10 @@
     heroTimer: null,
     news: null,
     newsLoading: false,
+    detail: null,
+    detailOrigin: null,
+    detailRequest: 0,
+    lightboxIndex: 0,
     searchIndex: -1,
     searchResults: [],
   };
@@ -144,6 +148,869 @@
     }
   }
 
+  function compactNumber(value) {
+    if (value === null || value === undefined) return '';
+    try {
+      return new Intl.NumberFormat('en-US', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(Number(value));
+    } catch {
+      return String(value);
+    }
+  }
+
+  const RICH_ALLOWED_TAGS = new Set([
+    'P',
+    'BR',
+    'UL',
+    'OL',
+    'LI',
+    'STRONG',
+    'EM',
+    'B',
+    'I',
+    'U',
+    'H1',
+    'H2',
+    'H3',
+    'H4',
+    'IMG',
+    'A',
+    'BLOCKQUOTE',
+    'SPAN',
+    'DIV',
+    'TABLE',
+    'THEAD',
+    'TBODY',
+    'TR',
+    'TD',
+    'TH',
+    'HR',
+    'CODE',
+    'PRE',
+    'SUB',
+    'SUP',
+    'SMALL',
+  ]);
+
+  const RICH_BLOCKED_TAGS = new Set([
+    'SCRIPT',
+    'STYLE',
+    'IFRAME',
+    'OBJECT',
+    'EMBED',
+    'FORM',
+    'INPUT',
+    'BUTTON',
+    'SELECT',
+    'TEXTAREA',
+    'VIDEO',
+    'AUDIO',
+    'SOURCE',
+    'LINK',
+    'META',
+    'BASE',
+    'SVG',
+    'MATH',
+    'TEMPLATE',
+    'NOSCRIPT',
+    'FRAME',
+    'FRAMESET',
+    'APPLET',
+  ]);
+
+  function safeHttpUrl(value) {
+    try {
+      const url = new URL(value, 'https://store.steampowered.com');
+      if (!['http:', 'https:'].includes(url.protocol)) return '';
+      return url.toString();
+    } catch {
+      return '';
+    }
+  }
+
+  function sanitizeRichHtml(html) {
+    if (!html) return '';
+
+    const documentFragment = new DOMParser().parseFromString(
+      `<div id="steam-root">${html}</div>`,
+      'text/html',
+    );
+    const root = documentFragment.getElementById('steam-root');
+    if (!root) return '';
+
+    const cleanNode = (node) => {
+      for (const child of [...node.childNodes]) {
+        if (child.nodeType === Node.TEXT_NODE) continue;
+        if (child.nodeType !== Node.ELEMENT_NODE) {
+          child.remove();
+          continue;
+        }
+
+        const tag = child.tagName;
+        if (RICH_BLOCKED_TAGS.has(tag)) {
+          child.remove();
+          continue;
+        }
+
+        cleanNode(child);
+
+        if (!RICH_ALLOWED_TAGS.has(tag)) {
+          const fragment = documentFragment.createDocumentFragment();
+          while (child.firstChild) fragment.appendChild(child.firstChild);
+          child.replaceWith(fragment);
+          continue;
+        }
+
+        for (const attribute of [...child.attributes]) {
+          const name = attribute.name.toLowerCase();
+
+          if (tag === 'IMG' && name === 'src') {
+            const src = safeHttpUrl(attribute.value);
+            if (src) {
+              child.setAttribute('src', src);
+              child.setAttribute('loading', 'lazy');
+              child.setAttribute('decoding', 'async');
+            } else {
+              child.removeAttribute(attribute.name);
+            }
+          } else if (tag === 'IMG' && name === 'alt') {
+            child.setAttribute('alt', attribute.value);
+          } else if (tag === 'A' && name === 'href') {
+            const href = safeHttpUrl(attribute.value);
+            if (href) {
+              child.setAttribute('href', href);
+              child.setAttribute('data-open-url', href);
+              child.setAttribute('target', '_blank');
+              child.setAttribute('rel', 'noreferrer');
+            } else {
+              child.removeAttribute(attribute.name);
+            }
+          } else if (tag === 'A' && name === 'title') {
+            child.setAttribute('title', attribute.value);
+          } else if (
+            (tag === 'TD' || tag === 'TH') &&
+            (name === 'colspan' || name === 'rowspan')
+          ) {
+            child.setAttribute(name, attribute.value);
+          } else {
+            child.removeAttribute(attribute.name);
+          }
+        }
+
+        if (tag === 'IMG' && !child.getAttribute('src')) child.remove();
+      }
+    };
+
+    cleanNode(root);
+    return root.innerHTML;
+  }
+
+  function hostLabel(url) {
+    try {
+      return new URL(url).hostname.replace(/^www\./, '');
+    } catch {
+      return url;
+    }
+  }
+
+  function detailFact(label, value) {
+    if (!value) return '';
+    return `
+      <div class="detail-fact">
+        <dt>${escapeHtml(label)}</dt>
+        <dd>${escapeHtml(value)}</dd>
+      </div>
+    `;
+  }
+
+  function pickRequirementTab(data) {
+    for (const key of ['pc', 'mac', 'linux']) {
+      const requirements = data[`${key}Requirements`];
+      if (requirements?.minimum || requirements?.recommended) return key;
+    }
+    return 'pc';
+  }
+
+  function requirementsBody(data, tab) {
+    const requirements = data[`${tab}Requirements`] || {};
+    const block = (title, html) =>
+      html
+        ? `<div class="req-block"><h4>${title}</h4><div class="rich-text">${sanitizeRichHtml(html)}</div></div>`
+        : '';
+
+    return block('Minimum', requirements.minimum) + block('Recommended', requirements.recommended);
+  }
+
+  function requirementsMarkup(data) {
+    const tabs = [
+      ['pc', 'Windows'],
+      ['mac', 'macOS'],
+      ['linux', 'Linux'],
+    ].filter(([key]) => {
+      const requirements = data[`${key}Requirements`];
+      return Boolean(requirements?.minimum || requirements?.recommended);
+    });
+
+    if (!tabs.length) return '';
+
+    const active =
+      tabs.find(([key]) => key === state.detail?.reqTab)?.[0] || tabs[0][0];
+    if (state.detail) state.detail.reqTab = active;
+
+    return `
+      <section class="detail-section">
+        <h2 class="detail-section-title">System Requirements</h2>
+        <div class="req-tabs">
+          ${tabs
+            .map(
+              ([key, label]) => `
+                <button
+                  class="req-tab${key === active ? ' is-active' : ''}"
+                  type="button"
+                  data-req-tab="${key}"
+                >
+                  ${label}
+                </button>
+              `,
+            )
+            .join('')}
+        </div>
+        <div class="req-body">${requirementsBody(data, active)}</div>
+      </section>
+    `;
+  }
+
+  function detailBuyLabel(data) {
+    if (isFreeGame(data)) return 'Play for Free';
+    if (data.releaseDate?.comingSoon) {
+      return data.price ? 'Pre-purchase on Steam' : 'View on Steam';
+    }
+    return data.price ? 'Buy on Steam' : 'View on Steam';
+  }
+
+  function detailPurchaseCard(data) {
+    const saved = state.wishlist.has(String(data.id));
+    const priceView = {
+      ...data,
+      comingSoon: Boolean(data.releaseDate?.comingSoon && !data.price),
+    };
+    const kicker = data.releaseDate?.comingSoon
+      ? 'Coming soon'
+      : isFreeGame(data)
+        ? 'Free to play'
+        : 'Buy on Steam';
+
+    return `
+      <div class="detail-card buy-card">
+        <p class="detail-card-kicker">${kicker}</p>
+        <div class="detail-buy-price">${priceMarkup(priceView)}</div>
+        <button class="btn primary full" type="button" data-open-url="${escapeAttr(data.url)}">
+          ${detailBuyLabel(data)}
+          ${icon('external')}
+        </button>
+        <button
+          class="btn ghost full${saved ? ' is-saved' : ''}"
+          type="button"
+          data-heart="${escapeAttr(data.id)}"
+          aria-pressed="${saved}"
+        >
+          ${icon('heart')}
+          <span data-heart-label>${saved ? 'On Wishlist' : 'Add to Wishlist'}</span>
+        </button>
+        <p class="fine-print">Purchases and downloads are handled by Steam.</p>
+      </div>
+    `;
+  }
+
+  function detailStatsCard(data) {
+    const stats = [];
+
+    if (data.metacritic?.score) {
+      stats.push({ value: data.metacritic.score, label: 'Metacritic' });
+    }
+    if (data.recommendations !== null && data.recommendations !== undefined) {
+      stats.push({ value: compactNumber(data.recommendations), label: 'Player reviews' });
+    }
+    if (data.achievements?.total) {
+      stats.push({ value: compactNumber(data.achievements.total), label: 'Achievements' });
+    }
+    if (data.dlc?.length) {
+      stats.push({ value: compactNumber(data.dlc.length), label: 'DLC items' });
+    }
+
+    if (!stats.length) return '';
+
+    return `
+      <div class="detail-card">
+        <h3 class="detail-card-title">At a glance</h3>
+        <div class="stat-grid">
+          ${stats
+            .map(
+              (stat) => `
+                <div class="stat">
+                  <strong>${escapeHtml(stat.value)}</strong>
+                  <span>${escapeHtml(stat.label)}</span>
+                </div>
+              `,
+            )
+            .join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  function detailLinksCard(data) {
+    const links = [];
+
+    if (data.website) {
+      links.push({
+        label: 'Official website',
+        sub: hostLabel(data.website),
+        url: data.website,
+      });
+    }
+    if (data.support?.url) {
+      links.push({
+        label: 'Support',
+        sub: hostLabel(data.support.url),
+        url: data.support.url,
+      });
+    }
+    if (data.metacritic?.url) {
+      links.push({
+        label: 'Metacritic reviews',
+        sub: hostLabel(data.metacritic.url),
+        url: data.metacritic.url,
+      });
+    }
+    links.push({
+      label: 'Steam store page',
+      sub: hostLabel(data.url),
+      url: data.url,
+    });
+
+    return `
+      <div class="detail-card">
+        <h3 class="detail-card-title">Links</h3>
+        <div class="detail-links">
+          ${links
+            .map(
+              (link) => `
+                <button class="detail-link" type="button" data-open-url="${escapeAttr(link.url)}">
+                  <span class="detail-link-copy">
+                    <span>${escapeHtml(link.label)}</span>
+                    <small>${escapeHtml(link.sub)}</small>
+                  </span>
+                  ${icon('external')}
+                </button>
+              `,
+            )
+            .join('')}
+          ${
+            data.support?.email
+              ? `<div class="detail-link static">
+                  <span class="detail-link-copy">
+                    <span>Support email</span>
+                    <small>${escapeHtml(data.support.email)}</small>
+                  </span>
+                </div>`
+              : ''
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  function detailRatingsCard(data) {
+    const labels = {
+      esrb: 'ESRB',
+      pegi: 'PEGI',
+      usk: 'USK',
+      bbfc: 'BBFC',
+      cero: 'CERO',
+      oflc: 'OFLC',
+      acb: 'ACB',
+      crl: 'CRL',
+      dejus: 'DEJUS',
+      nordic: 'Nordic',
+    };
+
+    const ratings = Object.entries(data.ratings || {}).filter(([, rating]) => {
+      return rating && typeof rating === 'object' && (rating.rating || rating.descriptors);
+    });
+
+    const notes = data.contentDescriptors?.notes;
+    const requiredAge = Number(data.requiredAge) || 0;
+    if (!ratings.length && !notes && !requiredAge) return '';
+
+    return `
+      <div class="detail-card">
+        <h3 class="detail-card-title">Age & content</h3>
+        ${
+          requiredAge
+            ? `<div class="age-row"><span>Minimum age</span><strong>${requiredAge}+</strong></div>`
+            : ''
+        }
+        <div class="ratings">
+          ${ratings
+            .map(([key, rating]) => {
+              const descriptors = Array.isArray(rating.descriptors)
+                ? rating.descriptors.join(', ')
+                : rating.descriptors;
+              return `
+                <div class="rating-row">
+                  <span class="rating-board">${escapeHtml(labels[key] || key.toUpperCase())}</span>
+                  <div class="rating-copy">
+                    <strong>${escapeHtml(rating.rating || 'Rated')}</strong>
+                    ${
+                      descriptors
+                        ? `<small>${escapeHtml(String(descriptors))}</small>`
+                        : ''
+                    }
+                  </div>
+                </div>
+              `;
+            })
+            .join('')}
+        </div>
+        ${notes ? `<p class="age-note">${escapeHtml(String(notes))}</p>` : ''}
+      </div>
+    `;
+  }
+
+  function gameDetailMarkup(data) {
+    const saved = state.wishlist.has(String(data.id));
+    const heroBackground =
+      data.backgroundRaw ||
+      data.background ||
+      data.screenshots?.[0]?.full ||
+      data.headerImage;
+    const priceView = {
+      ...data,
+      comingSoon: Boolean(data.releaseDate?.comingSoon && !data.price),
+    };
+    const meta = [];
+    if (data.genres?.length) meta.push(...data.genres.slice(0, 2));
+    if (data.developers?.length) meta.push(data.developers[0]);
+    if (data.releaseDate?.date) meta.push(data.releaseDate.date);
+
+    const metaHtml = meta
+      .map((entry) => `<span>${escapeHtml(entry)}</span>`)
+      .join('<span class="meta-dot"></span>');
+
+    const badges = [];
+    if (data.releaseDate?.comingSoon) {
+      badges.push('<span class="pill muted">Coming Soon</span>');
+    }
+    if (isFreeGame(data)) {
+      badges.push('<span class="pill free">Free to Play</span>');
+    } else if (data.discount > 0) {
+      badges.push(`<span class="pill sale">-${data.discount}% off</span>`);
+    }
+    if (data.requiredAge >= 18) {
+      badges.push('<span class="pill muted">18+</span>');
+    }
+
+    const aboutHtml =
+      sanitizeRichHtml(data.aboutTheGame || data.detailedDescription) ||
+      (data.shortDescription ? `<p>${escapeHtml(data.shortDescription)}</p>` : '');
+
+    const screenshotsMarkup = data.screenshots?.length
+      ? `
+        <section class="detail-section">
+          <div class="detail-section-head">
+            <h2 class="detail-section-title">Screenshots</h2>
+            <span class="detail-section-count">${data.screenshots.length}</span>
+          </div>
+          <div class="screenshot-grid">
+            ${data.screenshots
+              .map(
+                (shot, index) => `
+                  <button
+                    class="screenshot"
+                    type="button"
+                    data-shot-index="${index}"
+                    aria-label="View screenshot ${index + 1} of ${data.screenshots.length}"
+                  >
+                    <img src="${escapeAttr(shot.thumb)}" alt="" loading="lazy" />
+                  </button>
+                `,
+              )
+              .join('')}
+          </div>
+        </section>
+      `
+      : '';
+
+    const moviesMarkup = data.movies?.length
+      ? `
+        <section class="detail-section">
+          <h2 class="detail-section-title">Trailers & gameplay</h2>
+          <div class="trailer-grid">
+            ${data.movies
+              .map((movie) => {
+                const source = movie.mp4 || movie.webm;
+                return `
+                  <div class="trailer-card">
+                    <video
+                      controls
+                      preload="none"
+                      playsinline
+                      poster="${escapeAttr(movie.thumbnail)}"
+                      src="${escapeAttr(source)}"
+                    ></video>
+                    <p>${escapeHtml(movie.name)}</p>
+                  </div>
+                `;
+              })
+              .join('')}
+          </div>
+        </section>
+      `
+      : '';
+
+    const achievementsMarkup = data.achievements?.total
+      ? `
+        <section class="detail-section">
+          <div class="detail-section-head">
+            <h2 class="detail-section-title">Achievements</h2>
+            <span class="detail-section-count">${data.achievements.total}</span>
+          </div>
+          ${
+            data.achievements.highlighted?.length
+              ? `<div class="achievement-grid">
+                  ${data.achievements.highlighted
+                    .map((achievement) => {
+                      const iconUrl = achievement.path
+                        ? /^https?:/i.test(achievement.path)
+                          ? achievement.path
+                          : `https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/${data.id}/${achievement.path}`
+                        : '';
+                      return `
+                        <div class="achievement">
+                          ${iconUrl ? `<img src="${escapeAttr(iconUrl)}" alt="" loading="lazy" />` : icon('gamepad')}
+                          <span>${escapeHtml(achievement.name)}</span>
+                        </div>
+                      `;
+                    })
+                    .join('')}
+                </div>`
+              : `<p class="detail-copy">This game has ${data.achievements.total} achievements to unlock on Steam.</p>`
+          }
+        </section>
+      `
+      : '';
+
+    const languagesMarkup = data.supportedLanguages
+      ? `
+        <section class="detail-section">
+          <h2 class="detail-section-title">Supported languages</h2>
+          <div class="rich-text language-table">${sanitizeRichHtml(
+            data.supportedLanguages,
+          )}</div>
+        </section>
+      `
+      : '';
+
+    const legalMarkup = data.legalNotice
+      ? `
+        <section class="detail-section">
+          <h2 class="detail-section-title">Legal notice</h2>
+          <div class="rich-text legal-copy">${sanitizeRichHtml(data.legalNotice)}</div>
+        </section>
+      `
+      : '';
+
+    const platforms = [
+      data.platforms?.windows ? 'Windows' : '',
+      data.platforms?.mac ? 'macOS' : '',
+      data.platforms?.linux ? 'Linux' : '',
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    return `
+      <div class="detail-topline">
+        <button class="btn ghost small" type="button" data-action="close-detail">
+          ${icon('chevron-left')}
+          Back to store
+        </button>
+      </div>
+
+      <section class="detail-hero">
+        ${
+          heroBackground
+            ? `<div class="detail-hero-bg"><img src="${escapeAttr(heroBackground)}" data-fallback="${escapeAttr(
+                data.headerImage || '',
+              )}" alt="" draggable="false" /></div>`
+            : ''
+        }
+        <div class="detail-hero-shade"></div>
+        <div class="detail-intro">
+          <div class="detail-badges">${badges.join('')}</div>
+          <h1 class="detail-title">${escapeHtml(data.name)}</h1>
+          <p class="detail-short">${escapeHtml(data.shortDescription)}</p>
+          <div class="detail-meta">${metaHtml}</div>
+          <div class="detail-actions">
+            <button class="btn primary" type="button" data-open-url="${escapeAttr(data.url)}">
+              ${detailBuyLabel(data)}
+              ${icon('external')}
+            </button>
+            <button
+              class="btn ghost${saved ? ' is-saved' : ''}"
+              type="button"
+              data-heart="${escapeAttr(data.id)}"
+              aria-pressed="${saved}"
+            >
+              ${icon('heart')}
+              <span data-heart-label>${saved ? 'On Wishlist' : 'Add to Wishlist'}</span>
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <div class="detail-layout">
+        <div class="detail-main">
+          ${
+            aboutHtml
+              ? `<section class="detail-section">
+                  <h2 class="detail-section-title">About this game</h2>
+                  <div class="rich-text about-copy">${aboutHtml}</div>
+                </section>`
+              : ''
+          }
+          ${screenshotsMarkup}
+          ${moviesMarkup}
+          ${requirementsMarkup(data)}
+          ${languagesMarkup}
+          ${achievementsMarkup}
+          ${legalMarkup}
+        </div>
+
+        <aside class="detail-aside">
+          ${detailPurchaseCard(data)}
+          ${detailStatsCard(data)}
+
+          <div class="detail-card">
+            <h3 class="detail-card-title">Game details</h3>
+            <dl class="detail-facts">
+              ${detailFact('Release date', data.releaseDate?.date || 'TBA')}
+              ${detailFact('Developer', data.developers?.join(', '))}
+              ${detailFact('Publisher', data.publishers?.join(', '))}
+              ${detailFact('Platforms', platforms)}
+              ${detailFact('Type', data.type === 'dlc' ? 'Downloadable content' : 'Base game')}
+              ${
+                data.controllerSupport
+                  ? detailFact(
+                      'Controller',
+                      data.controllerSupport === 'full' ? 'Full support' : 'Partial support',
+                    )
+                  : ''
+              }
+              ${
+                data.dlc?.length
+                  ? detailFact(
+                      'DLC',
+                      `${data.dlc.length} item${data.dlc.length === 1 ? '' : 's'}`,
+                    )
+                  : ''
+              }
+            </dl>
+            ${
+              data.genres?.length || data.categories?.length
+                ? `<div class="detail-tags">
+                    ${[...(data.genres || []), ...(data.categories || [])]
+                      .slice(0, 14)
+                      .map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`)
+                      .join('')}
+                  </div>`
+                : ''
+            }
+          </div>
+
+          ${detailLinksCard(data)}
+          ${detailRatingsCard(data)}
+        </aside>
+      </div>
+    `;
+  }
+
+  function renderDetailLoading() {
+    const mount = $('#gameDetailMount');
+    if (!mount) return;
+
+    mount.innerHTML = `
+      <div class="detail-topline">
+        <button class="btn ghost small" type="button" data-action="close-detail">
+          ${icon('chevron-left')}
+          Back to store
+        </button>
+      </div>
+      <div class="detail-hero detail-hero-skeleton skeleton"></div>
+      <div class="detail-layout">
+        <div class="detail-main">
+          <div class="detail-card detail-block skeleton" style="height: 260px"></div>
+          <div class="detail-card detail-block skeleton" style="height: 210px"></div>
+        </div>
+        <aside class="detail-aside">
+          <div class="detail-card detail-block skeleton" style="height: 230px"></div>
+          <div class="detail-card detail-block skeleton" style="height: 300px"></div>
+        </aside>
+      </div>
+    `;
+  }
+
+  function renderDetailError(message) {
+    const mount = $('#gameDetailMount');
+    if (!mount) return;
+
+    const name = state.detail?.summary?.name || 'this game';
+    const url = state.detail?.summary?.url || '';
+
+    mount.innerHTML = `
+      <div class="detail-topline">
+        <button class="btn ghost small" type="button" data-action="close-detail">
+          ${icon('chevron-left')}
+          Back to store
+        </button>
+      </div>
+      <div class="error-state">
+        <h2>Could not load ${escapeHtml(name)}</h2>
+        <p>${escapeHtml(message || 'Steam did not return the game details.')}</p>
+        <div class="empty-actions">
+          <button class="btn primary" type="button" data-action="retry-game">
+            ${icon('refresh')}
+            Try Again
+          </button>
+          ${
+            url
+              ? `<button class="btn ghost" type="button" data-open-url="${escapeAttr(
+                  url,
+                )}">Open on Steam ${icon('external')}</button>`
+              : ''
+          }
+        </div>
+      </div>
+    `;
+  }
+
+  function renderGameDetail() {
+    const mount = $('#gameDetailMount');
+    if (!mount || !state.detail?.data) return;
+    mount.innerHTML = gameDetailMarkup(state.detail.data);
+  }
+
+  function updateRequirementsTab(tab) {
+    const data = state.detail?.data;
+    if (!data) return;
+    if (!data[`${tab}Requirements`]) return;
+
+    state.detail.reqTab = tab;
+    $$('.req-tab', $('#gameDetailMount')).forEach((button) => {
+      button.classList.toggle('is-active', button.dataset.reqTab === tab);
+    });
+
+    const body = $('.req-body', $('#gameDetailMount'));
+    if (body) body.innerHTML = requirementsBody(data, tab);
+  }
+
+  function openLightbox(index) {
+    const screenshots = state.detail?.data?.screenshots || [];
+    if (!screenshots.length) return;
+
+    state.lightboxIndex = (index + screenshots.length) % screenshots.length;
+    const lightbox = $('#lightbox');
+    const image = $('#lightboxImage');
+    const caption = $('#lightboxCaption');
+    if (!lightbox || !image) return;
+
+    const shot = screenshots[state.lightboxIndex];
+    image.src = shot.full;
+    image.alt = `Screenshot ${state.lightboxIndex + 1}`;
+    if (caption) {
+      caption.textContent = `${state.lightboxIndex + 1} / ${screenshots.length}`;
+    }
+    lightbox.hidden = false;
+    document.body.classList.add('lightbox-open');
+  }
+
+  function closeLightbox() {
+    const lightbox = $('#lightbox');
+    const image = $('#lightboxImage');
+    if (!lightbox) return;
+    lightbox.hidden = true;
+    if (image) image.src = '';
+    document.body.classList.remove('lightbox-open');
+  }
+
+  function moveLightbox(direction) {
+    const screenshots = state.detail?.data?.screenshots || [];
+    if (!screenshots.length) return;
+    openLightbox(state.lightboxIndex + direction);
+  }
+
+  async function openGame(id) {
+    const key = String(id);
+    if (state.view !== 'game') {
+      state.detailOrigin = { view: state.view, scrollY: window.scrollY };
+    } else if (!state.detailOrigin) {
+      state.detailOrigin = { view: 'discover', scrollY: 0 };
+    }
+
+    const summary = state.catalog.get(key) || null;
+    const requestId = ++state.detailRequest;
+
+    state.detail = {
+      id: key,
+      summary,
+      data: null,
+      loading: true,
+      error: null,
+      reqTab: 'pc',
+    };
+    setView('game');
+    renderDetailLoading();
+
+    try {
+      if (!api?.getGame) throw new Error('The desktop bridge is unavailable.');
+      const data = await api.getGame(key);
+      if (requestId !== state.detailRequest) return;
+      if (!data) throw new Error('Steam did not return details for this game.');
+
+      state.detail = {
+        id: key,
+        summary,
+        data,
+        loading: false,
+        error: null,
+        reqTab: pickRequirementTab(data),
+      };
+      renderGameDetail();
+      updateWishlistUI();
+    } catch (error) {
+      if (requestId !== state.detailRequest) return;
+      state.detail = {
+        ...state.detail,
+        loading: false,
+        error: error?.message || 'Unable to load game details.',
+      };
+      renderDetailError(state.detail.error);
+    }
+  }
+
+  function closeDetail() {
+    const origin = state.detailOrigin || { view: 'discover', scrollY: 0 };
+    state.detailRequest += 1;
+    closeLightbox();
+    setView(origin.view === 'game' ? 'discover' : origin.view);
+    const target = Number(origin.scrollY) || 0;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => window.scrollTo(0, target));
+    });
+  }
+
   function gameCard(game) {
     const saved = state.wishlist.has(String(game.id));
     const media = game.image
@@ -160,7 +1027,7 @@
             class="card-open"
             type="button"
             data-open-app="${escapeAttr(game.id)}"
-            aria-label="Open ${escapeAttr(game.name)} on Steam"
+            aria-label="View details for ${escapeAttr(game.name)}"
           ></button>
           ${cardFlag(game)}
           <button
@@ -612,15 +1479,6 @@
     if (state.view === 'wishlist') renderWishlist();
   }
 
-  async function openGame(id) {
-    const game = state.catalog.get(String(id));
-    if (!game) {
-      showToast('This game is still loading.');
-      return;
-    }
-    await openUrl(game.url);
-  }
-
   async function openUrl(url) {
     if (!api?.openExternal) {
       showToast('Desktop bridge unavailable.');
@@ -769,7 +1627,7 @@
   }
 
   function setView(name) {
-    const allowed = ['discover', 'browse', 'news', 'wishlist', 'library'];
+    const allowed = ['discover', 'browse', 'news', 'wishlist', 'library', 'game'];
     if (!allowed.includes(name)) return;
 
     state.view = name;
@@ -777,8 +1635,11 @@
       view.hidden = view.id !== `view-${name}`;
     });
 
+    const tabContext =
+      name === 'game' ? state.detailOrigin?.view || 'discover' : name;
+
     $$('.top-tab').forEach((tab) => {
-      const active = tab.dataset.tab === name;
+      const active = tab.dataset.tab === tabContext;
       tab.classList.toggle('is-active', active);
       tab.setAttribute('aria-selected', String(active));
     });
@@ -787,7 +1648,8 @@
       const target = button.dataset.nav;
       const active =
         target === name ||
-        (target === 'discover' && ['discover', 'browse', 'news'].includes(name));
+        (target === 'discover' &&
+          ['discover', 'browse', 'news', 'game'].includes(name));
       button.classList.toggle('is-active', active);
     });
 

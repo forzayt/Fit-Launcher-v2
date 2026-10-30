@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+      content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data:; media-src https:; connect-src 'self'; object-src 'none'; base-uri 'none'"
     />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Fit Launcher</title>
@@ -90,6 +90,10 @@
             <rect width="32" height="32" rx="8" fill="currentColor" />
             <path d="M10 8h13v5h-7v3.5h6v5h-6V24h-6V8Z" fill="#101014" />
           </svg>
+          <span class="brand-copy">
+            <strong>Fit Launcher</strong>
+            <small>Store</small>
+          </span>
         </button>
 
         <nav class="rail-nav" aria-label="Primary">
@@ -97,38 +101,38 @@
             class="rail-btn is-active"
             type="button"
             data-nav="discover"
-            title="Store"
             aria-label="Store"
           >
             <svg class="icon" aria-hidden="true"><use href="#i-store"></use></svg>
+            <span class="rail-label">Store</span>
           </button>
           <button
             class="rail-btn"
             type="button"
             data-nav="library"
-            title="Library"
             aria-label="Library"
           >
             <svg class="icon" aria-hidden="true"><use href="#i-library"></use></svg>
+            <span class="rail-label">Library</span>
           </button>
           <button
             class="rail-btn"
             type="button"
             data-nav="wishlist"
-            title="Wishlist"
             aria-label="Wishlist"
           >
             <svg class="icon" aria-hidden="true"><use href="#i-heart"></use></svg>
+            <span class="rail-label">Wishlist</span>
             <span class="rail-badge" id="wishlistRailBadge" hidden>0</span>
           </button>
           <button
             class="rail-btn"
             type="button"
             data-toast="Friends list is not connected in this demo."
-            title="Friends"
             aria-label="Friends"
           >
             <svg class="icon" aria-hidden="true"><use href="#i-friends"></use></svg>
+            <span class="rail-label">Friends</span>
           </button>
         </nav>
 
@@ -137,19 +141,19 @@
             class="rail-btn"
             type="button"
             data-toast="Settings are coming soon."
-            title="Settings"
             aria-label="Settings"
           >
             <svg class="icon" aria-hidden="true"><use href="#i-settings"></use></svg>
+            <span class="rail-label">Settings</span>
           </button>
           <button
-            class="rail-avatar"
+            class="rail-profile"
             type="button"
             data-toast="Signed in as Fit Player (demo profile)."
-            title="Fit Player"
             aria-label="Profile"
           >
-            FP
+            <span class="rail-avatar">FP</span>
+            <span class="rail-label">Fit Player</span>
           </button>
         </div>
       </aside>
@@ -263,6 +267,10 @@
             <div class="news-grid" id="newsGrid"></div>
           </section>
 
+          <section class="view" id="view-game" aria-label="Game details" hidden>
+            <div id="gameDetailMount"></div>
+          </section>
+
           <section class="view" id="view-wishlist" aria-label="Wishlist" hidden>
             <header class="view-head">
               <div>
@@ -332,6 +340,44 @@
     </div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <div
+      class="lightbox"
+      id="lightbox"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Screenshot viewer"
+      hidden
+    >
+      <button
+        class="lightbox-close"
+        type="button"
+        data-lightbox-close
+        aria-label="Close screenshot viewer"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg>
+      </button>
+      <button
+        class="lightbox-arrow lightbox-prev"
+        type="button"
+        data-lightbox-dir="-1"
+        aria-label="Previous screenshot"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-chevron-left"></use></svg>
+      </button>
+      <figure class="lightbox-figure">
+        <img id="lightboxImage" src="" alt="" />
+        <figcaption id="lightboxCaption"></figcaption>
+      </figure>
+      <button
+        class="lightbox-arrow lightbox-next"
+        type="button"
+        data-lightbox-dir="1"
+        aria-label="Next screenshot"
+      >
+        <svg class="icon" aria-hidden="true"><use href="#i-chevron-right"></use></svg>
+      </button>
+    </div>
 
     <script src="renderer.js"></script>
   </body>

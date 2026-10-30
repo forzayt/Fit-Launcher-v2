@@ -21,6 +21,7 @@ const NEWS_TTL = 15 * 60 * 1000;
 let homeCache = null;
 let homeRequest = null;
 const newsCache = new Map();
+const gameCache = new Map();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -320,6 +321,107 @@ function buildNewsItem(article, appid) {
   };
 }
 
+function normalizeGameDetails(raw) {
+  const price = raw.price_overview || null;
+  const screenshots = (raw.screenshots || [])
+    .filter((shot) => shot?.path_full)
+    .map((shot) => ({
+      thumb: shot.path_thumbnail || shot.path_full,
+      full: shot.path_full,
+    }));
+
+  const movies = (raw.movies || [])
+    .map((movie) => ({
+      id: movie.id,
+      name: cleanText(movie.name, 120) || 'Trailer',
+      thumbnail: movie.thumbnail || '',
+      mp4: movie.mp4?.max || movie.mp4?.['480'] || '',
+      webm: movie.webm?.max || movie.webm?.['480'] || '',
+    }))
+    .filter((movie) => movie.mp4 || movie.webm);
+
+  const highlighted = (raw.achievements?.highlighted || [])
+    .filter((achievement) => achievement?.name)
+    .map((achievement) => ({
+      name: cleanText(achievement.name, 120),
+      path: achievement.path || '',
+    }));
+
+  return {
+    id: String(raw.steam_appid),
+    name: raw.name,
+    type: raw.type || 'game',
+    requiredAge: Number(raw.required_age) || 0,
+    isFree: Boolean(raw.is_free),
+    shortDescription: cleanText(raw.short_description),
+    aboutTheGame: raw.about_the_game || '',
+    detailedDescription: raw.detailed_description || '',
+    supportedLanguages: raw.supported_languages || '',
+    headerImage: raw.header_image || '',
+    capsuleImage: raw.capsule_image || '',
+    background: raw.background || '',
+    backgroundRaw: raw.background_raw || '',
+    website: raw.website || '',
+    developers: raw.developers || [],
+    publishers: raw.publishers || [],
+    releaseDate: {
+      date: raw.release_date?.date || '',
+      comingSoon: Boolean(raw.release_date?.coming_soon),
+    },
+    genres: (raw.genres || []).map((genre) => genre.description).filter(Boolean),
+    categories: (raw.categories || [])
+      .map((category) => category.description)
+      .filter(Boolean),
+    platforms: raw.platforms || {},
+    metacritic: raw.metacritic || null,
+    recommendations: raw.recommendations?.total ?? null,
+    achievements: raw.achievements
+      ? {
+          total: Number(raw.achievements.total) || 0,
+          highlighted,
+        }
+      : null,
+    screenshots,
+    movies,
+    price,
+    discount: Number(price?.discount_percent) || 0,
+    originalPrice: typeof price?.initial === 'number' ? price.initial : null,
+    finalPrice: typeof price?.final === 'number' ? price.final : raw.is_free ? 0 : null,
+    currency: price?.currency || 'USD',
+    dlc: raw.dlc || [],
+    controllerSupport: raw.controller_support || '',
+    contentDescriptors: raw.content_descriptors || null,
+    ratings: raw.ratings || null,
+    legalNotice: raw.legal_notice || '',
+    support: raw.support_info || null,
+    pcRequirements: raw.pc_requirements || null,
+    macRequirements: raw.mac_requirements || null,
+    linuxRequirements: raw.linux_requirements || null,
+    url: appUrl(raw.steam_appid),
+  };
+}
+
+async function getGameDetails(appid, force = false) {
+  const id = Number(appid);
+  if (!Number.isInteger(id) || id <= 0) {
+    throw new Error('That game id is not valid.');
+  }
+
+  const cached = gameCache.get(id);
+  if (!force && cached && Date.now() - cached.fetchedAt < CACHE_TTL) {
+    return cached.data;
+  }
+
+  const raw = await getAppDetails(id);
+  if (!raw) {
+    throw new Error('Steam did not return details for this game right now.');
+  }
+
+  const data = normalizeGameDetails(raw);
+  gameCache.set(id, { fetchedAt: Date.now(), data });
+  return data;
+}
+
 async function getNewsData(appIds, force = false) {
   const ids = [
     ...new Set(
@@ -423,6 +525,9 @@ app.whenReady().then(() => {
   ipcMain.handle('store:getHome', (_event, force) => getHomeData(Boolean(force)));
   ipcMain.handle('store:getNews', (_event, appIds, force) =>
     getNewsData(appIds, Boolean(force)),
+  );
+  ipcMain.handle('store:getGame', (_event, appid, force) =>
+    getGameDetails(appid, Boolean(force)),
   );
   ipcMain.handle('shell:openExternal', (_event, url) => openExternal(url));
 
