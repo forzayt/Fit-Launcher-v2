@@ -790,7 +790,8 @@
                 </section>`
               : ''
           }
-          ${fitgirlSectionMarkup()}
+          <!-- Repack downloads section hidden for now. -->
+          <!-- fitgirlSectionMarkup() -->
           ${screenshotsMarkup}
           ${moviesMarkup}
           ${requirementsMarkup(data)}
@@ -1210,7 +1211,8 @@
       };
       renderGameDetail();
       updateWishlistUI();
-      loadFitGirl(key, requestId);
+      // Repack downloads loading disabled while the section is hidden.
+      // loadFitGirl(key, requestId);
     } catch (error) {
       if (requestId !== state.detailRequest) return;
       state.detail = {
