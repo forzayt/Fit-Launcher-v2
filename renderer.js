@@ -2330,26 +2330,32 @@
     };
   }
 
-  function renderWishlist() {
-    const grid = $('#wishlistGrid');
-    const empty = $('#wishlistEmpty');
-    const count = $('#wishlistCount');
-    if (!grid || !empty) return;
-
-    const items = [...state.wishlist]
+  function wishlistDisplayItems() {
+    return [...state.wishlist]
       .map(
         (id) =>
           state.catalog.get(String(id)) ||
           state.wishlistItems.get(String(id)) ||
           wishlistPlaceholder(id),
       )
-      .sort((a, b) => a.name.localeCompare(b.name));
+      .sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  }
 
+  function paintWishlist() {
+    const grid = $('#wishlistGrid');
+    const empty = $('#wishlistEmpty');
+    const count = $('#wishlistCount');
+    if (!grid || !empty) return;
+
+    const items = wishlistDisplayItems();
     grid.innerHTML = items.map((game) => gameCard(game)).join('');
     grid.hidden = items.length === 0;
     empty.hidden = items.length > 0;
     if (count) count.textContent = String(items.length);
+  }
 
+  function renderWishlist() {
+    paintWishlist();
     hydrateWishlistItems();
   }
 
@@ -2367,38 +2373,29 @@
     state.wishlistHydrating = true;
 
     try {
-      await Promise.allSettled(
-        missing.map(async (id) => {
-          try {
-            const data = await api.getGame(id);
-            const snapshot = wishlistSnapshot(data);
-            if (snapshot && state.wishlist.has(String(id))) {
-              state.wishlistItems.set(String(id), snapshot);
-            }
-          } catch {
-            /* keep the placeholder */
-          }
-        }),
+      const results = await Promise.allSettled(
+        missing.map((id) => api.getGame(id)),
       );
-      saveWishlist();
-      if (state.view === 'wishlist') {
-        const grid = $('#wishlistGrid');
-        const empty = $('#wishlistEmpty');
-        const count = $('#wishlistCount');
-        const items = [...state.wishlist]
-          .map(
-            (id) =>
-              state.catalog.get(String(id)) ||
-              state.wishlistItems.get(String(id)) ||
-              wishlistPlaceholder(id),
-          )
-          .sort((a, b) => a.name.localeCompare(b.name));
 
-        if (grid) grid.innerHTML = items.map((game) => gameCard(game)).join('');
-        if (grid) grid.hidden = items.length === 0;
-        if (empty) empty.hidden = items.length > 0;
-        if (count) count.textContent = String(items.length);
-      }
+      let changed = false;
+      results.forEach((result, index) => {
+        const id = String(missing[index]);
+        if (result.status !== 'fulfilled') {
+          wishlistRequested.delete(id);
+          return;
+        }
+
+        const snapshot = wishlistSnapshot(result.value);
+        if (snapshot && state.wishlist.has(id)) {
+          state.wishlistItems.set(id, snapshot);
+          changed = true;
+        } else if (!snapshot) {
+          wishlistRequested.delete(id);
+        }
+      });
+
+      if (changed) saveWishlist();
+      if (state.view === 'wishlist') paintWishlist();
     } finally {
       state.wishlistHydrating = false;
     }
