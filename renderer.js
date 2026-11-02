@@ -61,6 +61,7 @@
 
   const toast = $('#toast');
   let toastTimer = null;
+  let gameDirectoryRequest = null;
 
   function showToast(message) {
     if (!toast) return;
@@ -878,6 +879,112 @@
     `;
   }
 
+  function sanitizeDownloadFolder(value) {
+    let name = String(value || 'Game')
+      .replace(/[<>:"/\\|?*\u0000-\u001f]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[. ]+$/g, '')
+      .slice(0, 150);
+
+    if (!name) name = 'Game';
+    if (/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(\..*)?$/i.test(name)) name = `_${name}`;
+    return name;
+  }
+
+  function downloadFolderPath() {
+    const root = String(state.gameDirectory || '').trim();
+    if (!root) return '';
+
+    const separator = root.endsWith('\\') || root.endsWith('/') ? '' : '\\';
+    return `${root}${separator}${sanitizeDownloadFolder(state.download.name)}`;
+  }
+
+  function updateDownloadLocation() {
+    const pathEl = $('#downloadLocationPath');
+    if (!pathEl) return;
+
+    const path = downloadFolderPath();
+    pathEl.textContent = path || 'Resolving folder…';
+    pathEl.title = path;
+  }
+
+  async function ensureGameDirectory() {
+    if (state.gameDirectory) return state.gameDirectory;
+    if (gameDirectoryRequest) return gameDirectoryRequest;
+
+    gameDirectoryRequest = (async () => {
+      try {
+        if (!api?.getGameDirectory) return '';
+        const info = await api.getGameDirectory();
+        if (info?.path) state.gameDirectory = info.path;
+      } catch {
+        /* keep the placeholder */
+      }
+      return state.gameDirectory;
+    })();
+
+    try {
+      await gameDirectoryRequest;
+    } finally {
+      gameDirectoryRequest = null;
+      updateDownloadLocation();
+    }
+
+    return state.gameDirectory;
+  }
+
+  function downloadDetailsMarkup(data, groups, parts) {
+    const host =
+      groups
+        .map((group) => group.label || group.host || '')
+        .filter(Boolean)
+        .join(', ') || 'FuckingFast';
+    const size = data.repackSize || 'Unknown';
+    const busy = state.download.jobActive;
+
+    return `
+      <div class="download-details">
+        <div class="download-details-location">
+          <span class="download-details-label">Download location</span>
+          <span class="download-details-path" id="downloadLocationPath">${escapeHtml(
+            downloadFolderPath() || 'Resolving folder…',
+          )}</span>
+        </div>
+
+        <div class="download-details-host">
+          <span class="download-details-label">Host</span>
+          <strong>${escapeHtml(host)}</strong>
+        </div>
+
+        <div class="download-details-stats">
+          <div class="download-detail-stat">
+            <span>Parts</span>
+            <strong>${parts}</strong>
+          </div>
+          <div class="download-detail-stat">
+            <span>Total size</span>
+            <strong>${escapeHtml(size)}</strong>
+          </div>
+        </div>
+
+        <button
+          class="btn primary download-confirm"
+          type="button"
+          data-action="download-repacks"
+          ${busy ? 'disabled' : ''}
+        >
+          ${icon('download')}
+          ${busy ? 'Download in progress…' : 'Confirm download'}
+        </button>
+
+        <p class="download-details-note">
+          Files are saved into a folder named after this game.
+        </p>
+      </div>
+    `;
+  }
+
   function fitgirlLinkMarkup(link) {
     const host = link.magnet ? 'magnet' : link.host || hostLabel(link.url);
     return `
@@ -1071,8 +1178,10 @@
     );
 
     const total = groups.reduce((sum, group) => sum + group.links.length, 0);
-    if (sub) sub.textContent = `${name} · ${total} FuckingFast links`;
-    body.innerHTML = fitgirlDataMarkup({ ...download.data, groups, total });
+    if (sub) sub.textContent = name;
+    body.innerHTML = downloadDetailsMarkup(download.data, groups, total);
+    updateDownloadLocation();
+    ensureGameDirectory();
   }
 
   async function loadFitGirl(id, name = '', force = false) {
@@ -1375,6 +1484,8 @@
       percent: 0,
     });
     if (state.view === 'downloads') renderDownloads();
+    const modal = $('#downloadModal');
+    if (modal && !modal.hidden) renderDownloadModal();
 
     try {
       const result = await api.startDownloads({ gameTitle, links: files });
@@ -1399,6 +1510,8 @@
       });
       showToast(error?.message || 'Could not start downloads.');
       if (state.view === 'downloads') renderDownloads();
+      const modal = $('#downloadModal');
+      if (modal && !modal.hidden) renderDownloadModal();
     }
   }
 
@@ -1496,6 +1609,10 @@
         });
         if (!payload.cancelled) recordDownloadHistory(payload);
         if (state.view === 'downloads') renderDownloads();
+        {
+          const modal = $('#downloadModal');
+          if (modal && !modal.hidden) renderDownloadModal();
+        }
         showToast(
           payload.cancelled
             ? 'Downloads cancelled.'
@@ -1516,6 +1633,10 @@
         });
         if (state.view === 'downloads') renderDownloads();
         showToast(payload.error || 'Downloads failed.');
+        {
+          const modal = $('#downloadModal');
+          if (modal && !modal.hidden) renderDownloadModal();
+        }
         break;
 
       default:

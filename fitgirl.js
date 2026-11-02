@@ -23,6 +23,7 @@ const crypto = require('node:crypto');
 
 const SITE = 'https://fitgirl-repacks.site';
 const CACHE_TTL = 6 * 60 * 60 * 1000;
+const CACHE_VERSION = 'v2';
 const REQUEST_TIMEOUT = 20000;
 const MAX_VARIANTS = 4;
 const MAX_CANDIDATES_TO_INSPECT = 6;
@@ -173,6 +174,19 @@ function stripTags(html) {
   )
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function extractPostSizes(content) {
+  const text = stripTags(content);
+  const read = (label) => {
+    const match = new RegExp(`${label}\\s*:\\s*([^\\n]{0,48}?(?:GB|MB|TB))`, 'i').exec(text);
+    return match ? match[1].replace(/\s+/g, ' ').trim() : '';
+  };
+
+  return {
+    originalSize: read('Original Size'),
+    repackSize: read('Repack Size'),
+  };
 }
 
 function normalizeTitle(value) {
@@ -697,7 +711,7 @@ async function getRepackDownloads(gameTitle, { force = false, appid = null } = {
   if (!title) throw new Error('A game title is required to search FitGirl.');
 
   const targetId = appid == null ? '' : String(appid).trim();
-  const cacheKey = targetId ? `appid:${targetId}` : normalizeTitle(title);
+  const cacheKey = `${CACHE_VERSION}:${targetId ? `appid:${targetId}` : normalizeTitle(title)}`;
 
   if (!force) {
     const cached = memoryCache.get(cacheKey);
@@ -720,6 +734,7 @@ async function getRepackDownloads(gameTitle, { force = false, appid = null } = {
   const html = post.html || (await fetchText(post.url));
   const content = extractEntryContent(html);
   const groups = content ? parseDownloads(content) : [];
+  const sizes = content ? extractPostSizes(content) : { originalSize: '', repackSize: '' };
   const total = groups.reduce((sum, group) => sum + group.links.length, 0);
 
   if (!total) {
@@ -736,6 +751,8 @@ async function getRepackDownloads(gameTitle, { force = false, appid = null } = {
     postUrl: post.url,
     searchUrl: searchUrl(title),
     fetchedAt: Date.now(),
+    originalSize: sizes.originalSize,
+    repackSize: sizes.repackSize,
     total,
     groups,
   };
