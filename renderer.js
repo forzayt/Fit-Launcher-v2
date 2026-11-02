@@ -33,6 +33,15 @@
     detailOrigin: null,
     detailRequest: 0,
     lightboxIndex: 0,
+    download: {
+      id: null,
+      name: '',
+      loading: false,
+      data: null,
+      error: null,
+      searchUrl: null,
+      requestId: 0,
+    },
     searchIndex: -1,
     searchResults: [],
     searchTimer: null,
@@ -419,7 +428,12 @@
           ${detailBuyLabel(data)}
           ${icon('external')}
         </button>
-        <button class="btn ghost full" type="button">
+        <button
+          class="btn ghost full"
+          type="button"
+          data-download="${escapeAttr(data.id)}"
+          data-download-name="${escapeAttr(data.name)}"
+        >
           ${icon('download')}
           Download
         </button>
@@ -790,8 +804,6 @@
                 </section>`
               : ''
           }
-          <!-- Repack downloads section hidden for now. -->
-          <!-- fitgirlSectionMarkup() -->
           ${screenshotsMarkup}
           ${moviesMarkup}
           ${requirementsMarkup(data)}
@@ -856,18 +868,6 @@
     `;
   }
 
-  function fitgirlSectionMarkup() {
-    return `
-      <section class="detail-section fitgirl-section" id="fitgirlSection">
-        <div class="detail-section-head">
-          <h2 class="detail-section-title">Repack downloads</h2>
-          <span class="detail-section-count">FitGirl</span>
-        </div>
-        <div id="fitgirlBody">${fitgirlLoadingMarkup()}</div>
-      </section>
-    `;
-  }
-
   function fitgirlLinkMarkup(link) {
     const host = link.magnet ? 'magnet' : link.host || hostLabel(link.url);
     return `
@@ -884,11 +884,11 @@
     `;
   }
 
-  function fitgirlGroupMarkup(group, index) {
+  function fitgirlGroupMarkup(group) {
     const kindLabel =
       group.kind === 'torrent' ? 'Torrent' : group.kind === 'update' ? 'Update' : 'Direct';
     return `
-      <details class="fitgirl-group"${index === 0 ? ' open' : ''}>
+      <details class="fitgirl-group" open>
         <summary class="fitgirl-group-head">
           <span class="fitgirl-host">${escapeHtml(group.label)}</span>
           <span class="fitgirl-meta">
@@ -927,7 +927,7 @@
           <button class="btn ghost small" type="button" data-open-url="${escapeAttr(data.postUrl)}">
             Repack page ${icon('external')}
           </button>
-          <button class="btn ghost small" type="button" data-action="refresh-fitgirl">
+          <button class="btn ghost small" type="button" data-action="refresh-downloads">
             ${icon('refresh')} Refresh
           </button>
         </div>
@@ -937,21 +937,20 @@
         these files.
       </p>
       <div class="fitgirl-groups">
-        ${groups.map((group, index) => fitgirlGroupMarkup(group, index)).join('')}
+        ${groups.map((group) => fitgirlGroupMarkup(group)).join('')}
       </div>
     `;
   }
 
   function fitgirlErrorMarkup(message) {
-    const name = state.detail?.data?.name || state.detail?.summary?.name || 'this game';
+    const name = state.download.name || 'this game';
     const searchUrl =
-      state.detail?.fitgirl?.searchUrl ||
-      `https://fitgirl-repacks.site/?s=${encodeURIComponent(name)}`;
+      state.download.searchUrl || `https://fitgirl-repacks.site/?s=${encodeURIComponent(name)}`;
     return `
       <div class="fitgirl-state">
         <p>${escapeHtml(message || 'No repack downloads were found for this game.')}</p>
         <div class="fitgirl-state-actions">
-          <button class="btn ghost small" type="button" data-action="refresh-fitgirl">
+          <button class="btn ghost small" type="button" data-action="refresh-downloads">
             ${icon('refresh')} Try again
           </button>
           <button class="btn ghost small" type="button" data-open-url="${escapeAttr(searchUrl)}">
@@ -962,63 +961,122 @@
     `;
   }
 
-  function renderFitGirlSection() {
-    const body = $('#fitgirlBody');
+  function downloadGameName(id, fallbackName = '') {
+    return (
+      fallbackName ||
+      state.detail?.data?.name ||
+      state.detail?.summary?.name ||
+      state.catalog.get(String(id))?.name ||
+      'this game'
+    );
+  }
+
+  function openDownloadsModal(id, fallbackName = '') {
+    const modal = $('#downloadModal');
+    if (!modal) return;
+
+    const key = String(id);
+    const name = downloadGameName(key, fallbackName);
+    const current = state.download;
+    const hasResult = current.loading || current.data || current.error;
+    const sameGame = current.id === key && hasResult;
+
+    if (!sameGame) {
+      state.download = {
+        id: key,
+        name,
+        loading: true,
+        data: null,
+        error: null,
+        searchUrl: null,
+        requestId: current.requestId,
+      };
+    } else {
+      state.download.name = name;
+    }
+
+    modal.hidden = false;
+    document.body.classList.add('download-open');
+    renderDownloadModal();
+
+    if (!sameGame) loadFitGirl(key, name);
+  }
+
+  function closeDownloadsModal() {
+    const modal = $('#downloadModal');
+    if (modal) modal.hidden = true;
+    document.body.classList.remove('download-open');
+  }
+
+  function renderDownloadModal() {
+    const body = $('#downloadModalBody');
     if (!body) return;
 
-    const fitgirl = state.detail?.fitgirl;
-    if (!fitgirl || fitgirl.loading) {
+    const sub = $('#downloadModalSub');
+    const download = state.download;
+    const name = download.name || 'this game';
+
+    if (download.loading) {
+      if (sub) sub.textContent = `Searching FitGirl for ${name}…`;
       body.innerHTML = fitgirlLoadingMarkup();
       return;
     }
-    if (fitgirl.error) {
-      body.innerHTML = fitgirlErrorMarkup(fitgirl.error);
+
+    if (download.error) {
+      if (sub) sub.textContent = `${name} · no links found`;
+      body.innerHTML = fitgirlErrorMarkup(download.error);
       return;
     }
-    if (!fitgirl.data?.groups?.length) {
+
+    if (!download.data?.groups?.length) {
+      if (sub) sub.textContent = `${name} · no links found`;
       body.innerHTML = fitgirlErrorMarkup('No download links were found for this game.');
       return;
     }
-    body.innerHTML = fitgirlDataMarkup(fitgirl.data);
+
+    const hosts = download.data.groups.length;
+    if (sub) {
+      sub.textContent = `${name} · ${download.data.total} links across ${hosts} ${
+        hosts === 1 ? 'host' : 'hosts'
+      }`;
+    }
+    body.innerHTML = fitgirlDataMarkup(download.data);
   }
 
-  async function loadFitGirl(id, requestId, force = false) {
-    if (!state.detail) return;
-
-    state.detail.fitgirl = { loading: true, data: null, error: null, searchUrl: null };
-    renderFitGirlSection();
+  async function loadFitGirl(id, name = '', force = false) {
+    const requestId = ++state.download.requestId;
+    state.download.id = String(id);
+    if (name) state.download.name = name;
+    state.download.loading = true;
+    state.download.error = null;
+    state.download.searchUrl = null;
+    if (force) state.download.data = null;
+    renderDownloadModal();
 
     try {
       if (!api?.getFitGirlDownloads) throw new Error('The desktop bridge is unavailable.');
       const result = await api.getFitGirlDownloads(id, force);
-      if (requestId !== state.detailRequest) return;
+      if (requestId !== state.download.requestId) return;
 
+      state.download.loading = false;
       if (result?.ok === false) {
-        state.detail.fitgirl = {
-          loading: false,
-          data: null,
-          error: result.message,
-          searchUrl: result.searchUrl || null,
-        };
+        state.download.data = null;
+        state.download.error = result.message;
+        state.download.searchUrl = result.searchUrl || null;
       } else {
-        state.detail.fitgirl = {
-          loading: false,
-          data: result,
-          error: null,
-          searchUrl: result?.searchUrl || null,
-        };
+        state.download.data = result;
+        state.download.error = null;
+        state.download.searchUrl = result?.searchUrl || null;
       }
     } catch (error) {
-      if (requestId !== state.detailRequest) return;
-      state.detail.fitgirl = {
-        loading: false,
-        data: null,
-        error: error?.message || 'Could not fetch repack downloads.',
-        searchUrl: null,
-      };
+      if (requestId !== state.download.requestId) return;
+      state.download.loading = false;
+      state.download.data = null;
+      state.download.error = error?.message || 'Could not fetch repack downloads.';
+      state.download.searchUrl = null;
     }
 
-    renderFitGirlSection();
+    renderDownloadModal();
   }
 
   async function copyText(text) {
@@ -1046,7 +1104,7 @@
   }
 
   async function copyFitGirlGroup(groupId) {
-    const group = state.detail?.fitgirl?.data?.groups?.find((entry) => entry.id === groupId);
+    const group = state.download.data?.groups?.find((entry) => entry.id === groupId);
     if (!group) return;
 
     const copied = await copyText(group.links.map((link) => link.url).join('\n'));
@@ -1207,12 +1265,9 @@
         loading: false,
         error: null,
         reqTab: pickRequirementTab(data),
-        fitgirl: { loading: true, data: null, error: null },
       };
       renderGameDetail();
       updateWishlistUI();
-      // Repack downloads loading disabled while the section is hidden.
-      // loadFitGirl(key, requestId);
     } catch (error) {
       if (requestId !== state.detailRequest) return;
       state.detail = {
@@ -1228,6 +1283,7 @@
     const origin = state.detailOrigin || { view: 'discover', scrollY: 0 };
     state.detailRequest += 1;
     closeLightbox();
+    closeDownloadsModal();
     setView(origin.view === 'game' ? 'discover' : origin.view);
     const target = Number(origin.scrollY) || 0;
     requestAnimationFrame(() => {
@@ -1322,7 +1378,12 @@
                   ${primaryLabel}
                   ${icon('chevron-right')}
                 </button>
-                <button class="btn ghost" type="button">
+                <button
+                  class="btn ghost"
+                  type="button"
+                  data-download="${escapeAttr(game.id)}"
+                  data-download-name="${escapeAttr(game.name)}"
+                >
                   ${icon('download')}
                   Download
                 </button>
@@ -2149,6 +2210,19 @@
         return;
       }
 
+      const downloadTrigger = target.closest('[data-download]');
+      if (downloadTrigger) {
+        event.preventDefault();
+        openDownloadsModal(downloadTrigger.dataset.download, downloadTrigger.dataset.downloadName || '');
+        return;
+      }
+
+      const downloadClose = target.closest('[data-download-close]');
+      if (downloadClose) {
+        closeDownloadsModal();
+        return;
+      }
+
       const openUrlButton = target.closest('[data-open-url]');
       if (openUrlButton) {
         event.preventDefault();
@@ -2286,7 +2360,19 @@
       if (event.target === lightbox) closeLightbox();
     });
 
+    const downloadModal = $('#downloadModal');
+    downloadModal?.addEventListener('click', (event) => {
+      if (event.target === downloadModal) closeDownloadsModal();
+    });
+
     window.addEventListener('keydown', (event) => {
+      const downloadEl = $('#downloadModal');
+      if (downloadEl && !downloadEl.hidden && event.key === 'Escape') {
+        event.preventDefault();
+        closeDownloadsModal();
+        return;
+      }
+
       const lightboxEl = $('#lightbox');
       if (lightboxEl && !lightboxEl.hidden) {
         if (event.key === 'Escape') {
@@ -2381,8 +2467,8 @@
       case 'retry-game':
         if (state.detail?.id) openGame(state.detail.id);
         break;
-      case 'refresh-fitgirl':
-        if (state.detail?.id) loadFitGirl(state.detail.id, state.detailRequest, true);
+      case 'refresh-downloads':
+        if (state.download.id) loadFitGirl(state.download.id, state.download.name, true);
         break;
       case 'clear-cache':
         clearCache();

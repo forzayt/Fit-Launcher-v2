@@ -438,6 +438,34 @@
       </button>
     </div>
 
+    <div
+      class="download-modal"
+      id="downloadModal"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="downloadModalTitle"
+      hidden
+    >
+      <div class="download-modal-panel">
+        <header class="download-modal-head">
+          <div class="download-modal-heading">
+            <p class="download-modal-kicker">FitGirl repacks</p>
+            <h2 class="download-modal-title" id="downloadModalTitle">Download links</h2>
+            <p class="download-modal-sub" id="downloadModalSub">Loading download links…</p>
+          </div>
+          <button
+            class="download-modal-close"
+            type="button"
+            data-download-close
+            aria-label="Close download links"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-close"></use></svg>
+          </button>
+        </header>
+        <div class="download-modal-body" id="downloadModalBody"></div>
+      </div>
+    </div>
+
     <script src="renderer.js"></script>
   </body>
 </html>
