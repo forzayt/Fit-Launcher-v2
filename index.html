@@ -514,6 +514,37 @@
           </button>
         </header>
         <div class="download-modal-body" id="downloadModalBody"></div>
+        <div class="download-progress" id="downloadProgress" hidden>
+          <div class="download-progress-head">
+            <span id="downloadProgressLabel">Preparing downloads…</span>
+            <span id="downloadProgressPercent">0%</span>
+          </div>
+          <div class="download-progress-track">
+            <span id="downloadProgressBar"></span>
+          </div>
+          <div class="download-progress-foot">
+            <span id="downloadProgressDetail"></span>
+            <div class="download-progress-actions">
+              <button
+                class="btn ghost small"
+                type="button"
+                id="downloadCancelBtn"
+                data-action="cancel-downloads"
+              >
+                Cancel
+              </button>
+              <button
+                class="btn ghost small"
+                type="button"
+                id="downloadOpenBtn"
+                data-action="open-download-folder"
+                hidden
+              >
+                Open folder
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 

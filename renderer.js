@@ -41,6 +41,10 @@
       error: null,
       searchUrl: null,
       requestId: 0,
+      files: [],
+      jobId: null,
+      jobActive: false,
+      jobFolder: '',
     },
     searchIndex: -1,
     searchResults: [],
@@ -926,6 +930,9 @@
           </span>
         </div>
         <div class="fitgirl-summary-actions">
+          <button class="btn primary small" type="button" data-action="download-repacks">
+            ${icon('download')} Download all
+          </button>
           <button class="btn ghost small" type="button" data-open-url="${escapeAttr(data.postUrl)}">
             Repack page ${icon('external')}
           </button>
@@ -985,13 +992,14 @@
 
     if (!sameGame) {
       state.download = {
+        ...current,
         id: key,
         name,
         loading: true,
         data: null,
         error: null,
         searchUrl: null,
-        requestId: current.requestId,
+        files: [],
       };
     } else {
       state.download.name = name;
@@ -999,6 +1007,7 @@
 
     modal.hidden = false;
     document.body.classList.add('download-open');
+    if (!state.download.jobActive) hideDownloadProgress();
     renderDownloadModal();
 
     if (!sameGame) loadFitGirl(key, name);
@@ -1019,18 +1028,21 @@
     const name = download.name || 'this game';
 
     if (download.loading) {
+      download.files = [];
       if (sub) sub.textContent = `Searching FitGirl for ${name}…`;
       body.innerHTML = fitgirlLoadingMarkup();
       return;
     }
 
     if (download.error) {
+      download.files = [];
       if (sub) sub.textContent = `${name} · no links found`;
       body.innerHTML = fitgirlErrorMarkup(download.error);
       return;
     }
 
     if (!download.data?.groups?.length) {
+      download.files = [];
       if (sub) sub.textContent = `${name} · no links found`;
       body.innerHTML = fitgirlErrorMarkup('No download links were found for this game.');
       return;
@@ -1042,12 +1054,17 @@
     );
 
     if (!groups.length) {
+      download.files = [];
       if (sub) sub.textContent = `${name} · no FuckingFast links`;
       body.innerHTML = fitgirlErrorMarkup(
         'No FuckingFast download links were found for this game.',
       );
       return;
     }
+
+    download.files = groups.flatMap((group) =>
+      group.links.map((link) => ({ name: link.name || '', url: link.url })),
+    );
 
     const total = groups.reduce((sum, group) => sum + group.links.length, 0);
     if (sub) sub.textContent = `${name} · ${total} FuckingFast links`;
@@ -1088,6 +1105,215 @@
     }
 
     renderDownloadModal();
+  }
+
+  function hideDownloadProgress() {
+    const panel = $('#downloadProgress');
+    if (panel) panel.hidden = true;
+
+    const bar = $('#downloadProgressBar');
+    if (bar) bar.style.width = '0%';
+
+    const percent = $('#downloadProgressPercent');
+    if (percent) percent.textContent = '0%';
+
+    const cancel = $('#downloadCancelBtn');
+    if (cancel) cancel.hidden = false;
+
+    const open = $('#downloadOpenBtn');
+    if (open) open.hidden = true;
+  }
+
+  function updateDownloadProgress({ label, detail, percent = 0, open = false }) {
+    const panel = $('#downloadProgress');
+    if (panel) panel.hidden = false;
+
+    const labelEl = $('#downloadProgressLabel');
+    if (labelEl && label != null) labelEl.textContent = label;
+
+    const detailEl = $('#downloadProgressDetail');
+    if (detailEl && detail != null) detailEl.textContent = detail;
+
+    const clamped = Math.max(0, Math.min(100, Number(percent) || 0));
+    const bar = $('#downloadProgressBar');
+    if (bar) bar.style.width = `${clamped}%`;
+
+    const percentEl = $('#downloadProgressPercent');
+    if (percentEl) percentEl.textContent = `${Math.round(clamped)}%`;
+
+    const cancel = $('#downloadCancelBtn');
+    if (cancel) cancel.hidden = open || !state.download.jobActive;
+
+    const openBtn = $('#downloadOpenBtn');
+    if (openBtn) openBtn.hidden = !open;
+  }
+
+  async function startRepackDownloads() {
+    if (state.download.jobActive) {
+      showToast('A download is already running.');
+      return;
+    }
+
+    const files = (state.download.files || []).filter((file) => file?.url);
+    if (!files.length) {
+      showToast('No FuckingFast links to download.');
+      return;
+    }
+    if (!api?.startDownloads) {
+      showToast('Desktop bridge unavailable.');
+      return;
+    }
+
+    const gameTitle = state.download.name || 'Game';
+    state.download.jobActive = true;
+    state.download.jobId = null;
+    state.download.jobFolder = '';
+    updateDownloadProgress({
+      label: 'Preparing downloads…',
+      detail: gameTitle,
+      percent: 0,
+    });
+
+    try {
+      const result = await api.startDownloads({ gameTitle, links: files });
+      if (!result?.ok) throw new Error(result?.error || 'Could not start downloads.');
+
+      state.download.jobId = result.jobId;
+      state.download.jobFolder = result.folder || '';
+
+      updateDownloadProgress({
+        label: `Downloading ${result.count} ${result.count === 1 ? 'file' : 'files'}…`,
+        detail: result.folder || '',
+        percent: 0,
+      });
+      showToast(`Saving to ${result.folder}`);
+    } catch (error) {
+      state.download.jobActive = false;
+      state.download.jobId = null;
+      updateDownloadProgress({
+        label: 'Download could not start',
+        detail: error?.message || 'Unknown error.',
+        percent: 0,
+      });
+      showToast(error?.message || 'Could not start downloads.');
+    }
+  }
+
+  async function cancelRepackDownloads() {
+    if (!state.download.jobActive || !state.download.jobId || !api?.cancelDownloads) return;
+
+    try {
+      await api.cancelDownloads(state.download.jobId);
+      showToast('Cancelling downloads…');
+    } catch {
+      showToast('Could not cancel the downloads.');
+    }
+  }
+
+  async function openDownloadFolder() {
+    if (!state.download.jobFolder || !api?.openPath) return;
+
+    try {
+      await api.openPath(state.download.jobFolder);
+    } catch {
+      showToast('Could not open the download folder.');
+    }
+  }
+
+  function handleDownloadEvent(payload) {
+    if (!payload || !state.download.jobActive) return;
+
+    if (payload.jobId) {
+      if (state.download.jobId && state.download.jobId !== payload.jobId) return;
+      state.download.jobId = payload.jobId;
+    }
+
+    if (payload.folder) state.download.jobFolder = payload.folder;
+
+    switch (payload.type) {
+      case 'job-start':
+        updateDownloadProgress({
+          label: `Downloading ${payload.count} ${payload.count === 1 ? 'file' : 'files'}…`,
+          detail: payload.folder || '',
+          percent: 0,
+        });
+        break;
+
+      case 'file-start':
+        updateDownloadProgress({
+          label: `Downloading ${payload.file || 'file'}…`,
+          detail: `File ${payload.index} of ${payload.count}`,
+          percent: 0,
+        });
+        break;
+
+      case 'file-progress':
+        updateDownloadProgress({
+          label: payload.file || 'Downloading…',
+          detail: `${formatBytes(payload.received)} / ${
+            payload.total ? formatBytes(payload.total) : '…'
+          } · File ${payload.index} of ${payload.count}`,
+          percent: payload.percent ?? 0,
+        });
+        break;
+
+      case 'file-done':
+        updateDownloadProgress({
+          label: payload.skipped ? 'Already downloaded' : 'Saved file',
+          detail: `${payload.file || 'File'} · File ${payload.index} of ${payload.count}`,
+          percent: 100,
+        });
+        break;
+
+      case 'file-error':
+        updateDownloadProgress({
+          label: `Failed: ${payload.file || 'file'}`,
+          detail: payload.error || 'Download failed.',
+          percent: 0,
+        });
+        showToast(`Download failed: ${payload.error || payload.file}`);
+        break;
+
+      case 'job-done': {
+        state.download.jobActive = false;
+        state.download.jobFolder = payload.folder || state.download.jobFolder;
+        const ok = !payload.cancelled && !payload.failed;
+        updateDownloadProgress({
+          label: payload.cancelled
+            ? 'Downloads cancelled'
+            : ok
+              ? 'Downloads complete'
+              : 'Downloads finished with errors',
+          detail: `${payload.downloaded}/${payload.total} files saved to ${
+            state.download.jobFolder || 'the game folder'
+          }`,
+          percent: 100,
+          open: true,
+        });
+        showToast(
+          payload.cancelled
+            ? 'Downloads cancelled.'
+            : ok
+              ? 'Downloads complete.'
+              : `Downloads finished: ${payload.failed} failed.`,
+        );
+        break;
+      }
+
+      case 'job-error':
+        state.download.jobActive = false;
+        updateDownloadProgress({
+          label: 'Downloads failed',
+          detail: payload.error || 'Unknown error.',
+          percent: 0,
+          open: Boolean(state.download.jobFolder),
+        });
+        showToast(payload.error || 'Downloads failed.');
+        break;
+
+      default:
+        break;
+    }
   }
 
   async function copyText(text) {
@@ -2581,6 +2807,15 @@
       case 'refresh-downloads':
         if (state.download.id) loadFitGirl(state.download.id, state.download.name, true);
         break;
+      case 'download-repacks':
+        startRepackDownloads();
+        break;
+      case 'cancel-downloads':
+        cancelRepackDownloads();
+        break;
+      case 'open-download-folder':
+        openDownloadFolder();
+        break;
       case 'clear-cache':
         clearCache();
         break;
@@ -2612,6 +2847,9 @@
     loadWishlist();
     updateWishlistBadges();
     bindStaticEvents();
+    if (api?.onDownloadEvent) {
+      api.onDownloadEvent((payload) => handleDownloadEvent(payload));
+    }
     setView('discover');
     loadHome();
   }

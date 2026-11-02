@@ -2,6 +2,7 @@ const { app, BrowserWindow, ipcMain, shell, screen, dialog } = require('electron
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { getRepackDownloads, clearMemoryCache: clearFitGirlMemoryCache } = require('./fitgirl');
+const { startDownloads, cancelDownloads } = require('./downloads');
 
 const STEAM_API = {
   categories: 'https://store.steampowered.com/api/featuredcategories?cc=us&l=english',
@@ -778,6 +779,12 @@ app.whenReady().then(() => {
   ipcMain.handle('settings:chooseGameDirectory', (event) => chooseGameDirectory(event));
   ipcMain.handle('settings:resetGameDirectory', () => resetGameDirectory());
   ipcMain.handle('settings:openGameDirectory', () => openGameDirectory());
+  ipcMain.handle('downloads:start', async (event, payload) => {
+    const { path: root } = await getGameDirectory();
+    return startDownloads({ ...payload, root }, event.sender);
+  });
+  ipcMain.handle('downloads:cancel', (_event, jobId) => cancelDownloads(jobId));
+  ipcMain.handle('shell:openPath', (_event, target) => shell.openPath(path.resolve(String(target || ''))));
   ipcMain.handle('shell:openExternal', (_event, url) => openExternal(url));
 
   createWindow();

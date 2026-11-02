@@ -2506,6 +2506,81 @@ body.download-open {
   background-clip: padding-box;
 }
 
+.download-progress {
+  flex: 0 0 auto;
+  padding: 16px 22px 18px;
+  border-top: 1px solid #2c2c37;
+  background: rgba(12, 12, 16, 0.6);
+}
+
+.download-progress[hidden] {
+  display: none;
+}
+
+.download-progress-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 9px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.download-progress-head span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.download-progress-head span:last-child {
+  flex: none;
+  color: var(--accent-hover);
+  font-variant-numeric: tabular-nums;
+}
+
+.download-progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #26262f;
+}
+
+.download-progress-track span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--accent), #48b3ff);
+  transition: width 180ms ease;
+}
+
+.download-progress-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-top: 10px;
+}
+
+.download-progress-foot > span {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.download-progress-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
 .download-modal .fitgirl-summary {
   padding-bottom: 14px;
 }

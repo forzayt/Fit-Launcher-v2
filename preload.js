@@ -13,6 +13,14 @@ contextBridge.exposeInMainWorld('fitLauncher', {
   chooseGameDirectory: () => ipcRenderer.invoke('settings:chooseGameDirectory'),
   resetGameDirectory: () => ipcRenderer.invoke('settings:resetGameDirectory'),
   openGameDirectory: () => ipcRenderer.invoke('settings:openGameDirectory'),
+  startDownloads: (payload) => ipcRenderer.invoke('downloads:start', payload),
+  cancelDownloads: (jobId) => ipcRenderer.invoke('downloads:cancel', jobId),
+  onDownloadEvent: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('downloads:event', listener);
+    return () => ipcRenderer.removeListener('downloads:event', listener);
+  },
+  openPath: (target) => ipcRenderer.invoke('shell:openPath', target),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   versions: {
     electron: process.versions.electron,
