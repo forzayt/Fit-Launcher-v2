@@ -98,6 +98,11 @@ input:focus-visible,
   stroke-linejoin: round;
 }
 
+.icon-github {
+  fill: currentColor;
+  stroke: none;
+}
+
 /* ---------- App chrome ---------- */
 
 .app-shell {
