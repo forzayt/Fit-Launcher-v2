@@ -132,6 +132,15 @@
           <button
             class="rail-btn"
             type="button"
+            data-nav="downloads"
+            aria-label="Downloads"
+          >
+            <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+            <span class="rail-label">Downloads</span>
+          </button>
+          <button
+            class="rail-btn"
+            type="button"
             data-nav="wishlist"
             aria-label="Wishlist"
           >
@@ -329,6 +338,46 @@
                 </button>
                 <button class="btn ghost" type="button" data-action="go-discover">
                   Browse the store
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section class="view" id="view-downloads" aria-label="Downloads" hidden>
+            <header class="view-head">
+              <div>
+                <p class="eyebrow">Your library in motion</p>
+                <h1>Downloads</h1>
+              </div>
+              <button class="btn ghost small" type="button" data-action="open-game-dir">
+                <svg class="icon" aria-hidden="true"><use href="#i-folder"></use></svg>
+                Open downloads folder
+              </button>
+            </header>
+
+            <div class="downloads-page" id="downloadsPage">
+              <section class="downloads-section" id="downloadsActiveSection" hidden>
+                <h2 class="downloads-section-title">In progress</h2>
+                <div class="downloads-list" id="downloadsActiveList"></div>
+              </section>
+
+              <section class="downloads-section" id="downloadsHistorySection" hidden>
+                <h2 class="downloads-section-title">Completed</h2>
+                <div class="downloads-list" id="downloadsHistoryList"></div>
+              </section>
+
+              <div class="empty-state" id="downloadsEmpty">
+                <div class="empty-icon">
+                  <svg class="icon" aria-hidden="true"><use href="#i-download"></use></svg>
+                </div>
+                <h2>No downloads yet</h2>
+                <p>
+                  Start a download from any FitGirl repack page and it will appear here with its
+                  progress and destination folder.
+                </p>
+                <button class="btn primary" type="button" data-action="go-discover">
+                  Browse the store
+                  <svg class="icon" aria-hidden="true"><use href="#i-arrow-right"></use></svg>
                 </button>
               </div>
             </div>

@@ -15,6 +15,7 @@
   ];
 
   const WISHLIST_KEY = 'fit-launcher.wishlist.v1';
+  const DOWNLOADS_KEY = 'fit-launcher.downloads.v1';
   const HERO_INTERVAL = 8000;
 
   const state = {
@@ -45,7 +46,10 @@
       jobId: null,
       jobActive: false,
       jobFolder: '',
+      jobTitle: '',
+      progress: { label: '', detail: '', percent: 0 },
     },
+    downloadHistory: [],
     searchIndex: -1,
     searchResults: [],
     searchTimer: null,
@@ -1124,6 +1128,194 @@
     if (open) open.hidden = true;
   }
 
+  function loadDownloadHistory() {
+    try {
+      const raw = localStorage.getItem(DOWNLOADS_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      state.downloadHistory = Array.isArray(parsed)
+        ? parsed.filter((item) => item && item.folder).slice(0, 20)
+        : [];
+    } catch {
+      state.downloadHistory = [];
+    }
+  }
+
+  function saveDownloadHistory() {
+    try {
+      localStorage.setItem(DOWNLOADS_KEY, JSON.stringify(state.downloadHistory.slice(0, 20)));
+    } catch {
+      /* storage may be unavailable */
+    }
+  }
+
+  function recordDownloadHistory(payload) {
+    const folder = String(payload?.folder || state.download.jobFolder || '');
+    const downloaded = Math.max(0, Number(payload?.downloaded) || 0);
+    if (!folder || !downloaded) return;
+
+    const entry = {
+      id: `dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      title: state.download.jobTitle || state.download.name || 'Game',
+      folder,
+      downloaded,
+      total: Math.max(0, Number(payload?.total) || 0),
+      failed: Math.max(0, Number(payload?.failed) || 0),
+      finishedAt: Date.now(),
+    };
+
+    state.downloadHistory = [
+      entry,
+      ...state.downloadHistory.filter((item) => item.folder !== folder),
+    ].slice(0, 20);
+    saveDownloadHistory();
+  }
+
+  function downloadDateLabel(value) {
+    const date = new Date(Number(value));
+    if (Number.isNaN(date.getTime())) return '';
+    try {
+      return new Intl.DateTimeFormat(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(date);
+    } catch {
+      return date.toLocaleString();
+    }
+  }
+
+  function activeDownloadCard() {
+    const download = state.download;
+    const progress = download.progress || {};
+    const folder = download.jobFolder || '';
+    const percent = Math.round(Math.max(0, Math.min(100, Number(progress.percent) || 0)));
+
+    return `
+      <article class="download-card is-active">
+        <span class="download-card-icon">${icon('download')}</span>
+        <div class="download-card-body">
+          <div class="download-card-head">
+            <strong>${escapeHtml(download.jobTitle || download.name || 'Game')}</strong>
+            <span class="download-card-meta" id="downloadActivePercent">${percent}%</span>
+          </div>
+          <div class="download-progress-track download-card-track">
+            <span id="downloadActiveBar"></span>
+          </div>
+          <p class="download-card-path" id="downloadActiveStatus">${escapeHtml(
+            progress.label || 'Preparing downloads…',
+          )}</p>
+          <span class="download-card-sub" id="downloadActiveDetail">${escapeHtml(
+            progress.detail || folder,
+          )}</span>
+        </div>
+        <div class="download-card-actions">
+          <button
+            class="btn ghost small"
+            type="button"
+            data-action="open-download-folder"
+            ${folder ? '' : 'hidden'}
+          >
+            ${icon('folder')} Open folder
+          </button>
+          <button class="btn ghost small" type="button" data-action="cancel-downloads">
+            Cancel
+          </button>
+        </div>
+      </article>
+    `;
+  }
+
+  function downloadHistoryCard(item) {
+    const total = item.total || item.downloaded || 0;
+    const failed = item.failed ? ` · ${item.failed} failed` : '';
+    return `
+      <article class="download-card">
+        <span class="download-card-icon">${icon('download')}</span>
+        <div class="download-card-body">
+          <div class="download-card-head">
+            <strong>${escapeHtml(item.title || 'Game')}</strong>
+            <span class="download-card-meta">${item.downloaded}/${total} files</span>
+          </div>
+          <p class="download-card-path" title="${escapeAttr(item.folder)}">${escapeHtml(
+            item.folder,
+          )}</p>
+          <span class="download-card-sub">${escapeHtml(
+            downloadDateLabel(item.finishedAt),
+          )}${escapeHtml(failed)}</span>
+        </div>
+        <div class="download-card-actions">
+          <button
+            class="btn ghost small"
+            type="button"
+            data-action="open-download-folder"
+            data-folder="${escapeAttr(item.folder)}"
+          >
+            ${icon('folder')} Open folder
+          </button>
+          <button
+            class="btn ghost small"
+            type="button"
+            data-action="remove-download"
+            data-download-id="${escapeAttr(item.id)}"
+          >
+            Remove
+          </button>
+        </div>
+      </article>
+    `;
+  }
+
+  function syncDownloadsProgress() {
+    const download = state.download;
+    const progress = download.progress || {};
+    const bar = $('#downloadActiveBar');
+    if (!bar) return;
+
+    const percent = Math.max(0, Math.min(100, Number(progress.percent) || 0));
+    bar.style.width = `${percent}%`;
+
+    const percentEl = $('#downloadActivePercent');
+    if (percentEl) percentEl.textContent = `${Math.round(percent)}%`;
+
+    const statusEl = $('#downloadActiveStatus');
+    if (statusEl) statusEl.textContent = progress.label || 'Preparing downloads…';
+
+    const detailEl = $('#downloadActiveDetail');
+    if (detailEl) detailEl.textContent = progress.detail || download.jobFolder || '';
+
+    const openBtn = $('#downloadsActiveList [data-action="open-download-folder"]');
+    if (openBtn) openBtn.hidden = !download.jobFolder;
+  }
+
+  function renderDownloads() {
+    if (!$('#downloadsPage')) return;
+
+    const activeSection = $('#downloadsActiveSection');
+    const historySection = $('#downloadsHistorySection');
+    const activeList = $('#downloadsActiveList');
+    const historyList = $('#downloadsHistoryList');
+    const empty = $('#downloadsEmpty');
+    const active = Boolean(state.download.jobActive);
+    const history = state.downloadHistory || [];
+
+    if (activeSection) activeSection.hidden = !active;
+    if (historySection) historySection.hidden = history.length === 0;
+    if (empty) empty.hidden = active || history.length > 0;
+    if (activeList) activeList.innerHTML = active ? activeDownloadCard() : '';
+    if (historyList) {
+      historyList.innerHTML = history.map((item) => downloadHistoryCard(item)).join('');
+    }
+    if (active) syncDownloadsProgress();
+  }
+
+  function removeDownloadHistory(id) {
+    state.downloadHistory = state.downloadHistory.filter((item) => item.id !== id);
+    saveDownloadHistory();
+    renderDownloads();
+    showToast('Removed from downloads');
+  }
+
   function updateDownloadProgress({ label, detail, percent = 0, open = false }) {
     const panel = $('#downloadProgress');
     if (panel) panel.hidden = false;
@@ -1146,6 +1338,13 @@
 
     const openBtn = $('#downloadOpenBtn');
     if (openBtn) openBtn.hidden = !open;
+
+    state.download.progress = {
+      label: label ?? state.download.progress.label,
+      detail: detail ?? state.download.progress.detail,
+      percent: clamped,
+    };
+    if (state.view === 'downloads') syncDownloadsProgress();
   }
 
   async function startRepackDownloads() {
@@ -1168,11 +1367,14 @@
     state.download.jobActive = true;
     state.download.jobId = null;
     state.download.jobFolder = '';
+    state.download.jobTitle = gameTitle;
+    state.download.progress = { label: 'Preparing downloads…', detail: gameTitle, percent: 0 };
     updateDownloadProgress({
       label: 'Preparing downloads…',
       detail: gameTitle,
       percent: 0,
     });
+    if (state.view === 'downloads') renderDownloads();
 
     try {
       const result = await api.startDownloads({ gameTitle, links: files });
@@ -1196,6 +1398,7 @@
         percent: 0,
       });
       showToast(error?.message || 'Could not start downloads.');
+      if (state.view === 'downloads') renderDownloads();
     }
   }
 
@@ -1210,11 +1413,12 @@
     }
   }
 
-  async function openDownloadFolder() {
-    if (!state.download.jobFolder || !api?.openPath) return;
+  async function openDownloadFolder(folder) {
+    const target = String(folder || state.download.jobFolder || '');
+    if (!target || !api?.openPath) return;
 
     try {
-      await api.openPath(state.download.jobFolder);
+      await api.openPath(target);
     } catch {
       showToast('Could not open the download folder.');
     }
@@ -1290,6 +1494,8 @@
           percent: 100,
           open: true,
         });
+        if (!payload.cancelled) recordDownloadHistory(payload);
+        if (state.view === 'downloads') renderDownloads();
         showToast(
           payload.cancelled
             ? 'Downloads cancelled.'
@@ -1308,6 +1514,7 @@
           percent: 0,
           open: Boolean(state.download.jobFolder),
         });
+        if (state.view === 'downloads') renderDownloads();
         showToast(payload.error || 'Downloads failed.');
         break;
 
@@ -2323,7 +2530,16 @@
   }
 
   function setView(name) {
-    const allowed = ['discover', 'browse', 'news', 'wishlist', 'library', 'game', 'settings'];
+    const allowed = [
+      'discover',
+      'browse',
+      'news',
+      'wishlist',
+      'library',
+      'downloads',
+      'game',
+      'settings',
+    ];
     if (!allowed.includes(name)) return;
 
     state.view = name;
@@ -2351,6 +2567,7 @@
 
     if (name === 'browse') renderBrowse();
     if (name === 'wishlist') renderWishlist();
+    if (name === 'downloads') renderDownloads();
     if (name === 'news') loadNews();
     if (name === 'settings') {
       selectSettingsTab(state.settingsTab);
@@ -2635,7 +2852,7 @@
 
       const action = target.closest('[data-action]');
       if (action) {
-        handleAction(action.dataset.action);
+        handleAction(action.dataset.action, action);
         return;
       }
 
@@ -2784,7 +3001,7 @@
     });
   }
 
-  function handleAction(action) {
+  function handleAction(action, element) {
     switch (action) {
       case 'retry-home':
         loadHome(true);
@@ -2814,7 +3031,10 @@
         cancelRepackDownloads();
         break;
       case 'open-download-folder':
-        openDownloadFolder();
+        openDownloadFolder(element?.dataset?.folder);
+        break;
+      case 'remove-download':
+        if (element?.dataset?.downloadId) removeDownloadHistory(element.dataset.downloadId);
         break;
       case 'clear-cache':
         clearCache();
@@ -2845,6 +3065,7 @@
 
   function init() {
     loadWishlist();
+    loadDownloadHistory();
     updateWishlistBadges();
     bindStaticEvents();
     if (api?.onDownloadEvent) {
