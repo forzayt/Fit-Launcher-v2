@@ -1034,13 +1034,22 @@
       return;
     }
 
-    const hosts = download.data.groups.length;
-    if (sub) {
-      sub.textContent = `${name} · ${download.data.total} links across ${hosts} ${
-        hosts === 1 ? 'host' : 'hosts'
-      }`;
+    // Only FuckingFast links are shown for now.
+    const groups = download.data.groups.filter(
+      (group) => /fuckingfast/i.test(group.host || '') || /fuckingfast/i.test(group.label || ''),
+    );
+
+    if (!groups.length) {
+      if (sub) sub.textContent = `${name} · no FuckingFast links`;
+      body.innerHTML = fitgirlErrorMarkup(
+        'No FuckingFast download links were found for this game.',
+      );
+      return;
     }
-    body.innerHTML = fitgirlDataMarkup(download.data);
+
+    const total = groups.reduce((sum, group) => sum + group.links.length, 0);
+    if (sub) sub.textContent = `${name} · ${total} FuckingFast links`;
+    body.innerHTML = fitgirlDataMarkup({ ...download.data, groups, total });
   }
 
   async function loadFitGirl(id, name = '', force = false) {
