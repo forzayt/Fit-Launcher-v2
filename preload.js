@@ -9,6 +9,10 @@ contextBridge.exposeInMainWorld('fitLauncher', {
     ipcRenderer.invoke('fitgirl:getDownloads', appid, force),
   getCacheInfo: () => ipcRenderer.invoke('settings:getCacheInfo'),
   clearCache: () => ipcRenderer.invoke('settings:clearCache'),
+  getGameDirectory: () => ipcRenderer.invoke('settings:getGameDirectory'),
+  chooseGameDirectory: () => ipcRenderer.invoke('settings:chooseGameDirectory'),
+  resetGameDirectory: () => ipcRenderer.invoke('settings:resetGameDirectory'),
+  openGameDirectory: () => ipcRenderer.invoke('settings:openGameDirectory'),
   openExternal: (url) => ipcRenderer.invoke('shell:openExternal', url),
   versions: {
     electron: process.versions.electron,

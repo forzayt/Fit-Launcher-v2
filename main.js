@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, shell, screen, dialog } = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { getRepackDownloads, clearMemoryCache: clearFitGirlMemoryCache } = require('./fitgirl');
@@ -88,6 +88,101 @@ async function clearAppCache() {
 
   await fs.rm(cacheDirectory(), { recursive: true, force: true });
   return getCacheInfo();
+}
+
+const DEFAULT_GAME_FOLDER = 'FitLauncher';
+
+function settingsFile() {
+  return path.join(app.getPath('userData'), 'settings.json');
+}
+
+function defaultGameDirectory() {
+  return path.join(app.getPath('downloads'), DEFAULT_GAME_FOLDER);
+}
+
+function samePath(a, b) {
+  const left = path.resolve(a);
+  const right = path.resolve(b);
+  return process.platform === 'win32'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
+}
+
+async function readSettings() {
+  try {
+    return JSON.parse(await fs.readFile(settingsFile(), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+async function writeSettings(settings) {
+  await fs.mkdir(path.dirname(settingsFile()), { recursive: true });
+  await fs.writeFile(settingsFile(), JSON.stringify(settings, null, 2));
+}
+
+async function ensureDirectory(directory) {
+  await fs.mkdir(directory, { recursive: true });
+  return directory;
+}
+
+async function getGameDirectory() {
+  const settings = await readSettings();
+  const saved = typeof settings.gameDirectory === 'string' ? settings.gameDirectory.trim() : '';
+  const directory = saved || defaultGameDirectory();
+  const fallback = defaultGameDirectory();
+
+  try {
+    await ensureDirectory(directory);
+    return { path: directory, isDefault: samePath(directory, fallback) };
+  } catch (error) {
+    if (!samePath(directory, fallback)) {
+      await ensureDirectory(fallback);
+      return { path: fallback, isDefault: true, error: error.message };
+    }
+    throw error;
+  }
+}
+
+async function chooseGameDirectory(event) {
+  const current = await getGameDirectory();
+  const win = BrowserWindow.fromWebContents(event.sender);
+  const options = {
+    title: 'Choose where Fit Launcher saves games',
+    defaultPath: current.path,
+    buttonLabel: 'Use this folder',
+    properties: ['openDirectory', 'createDirectory'],
+  };
+  const result = win
+    ? await dialog.showOpenDialog(win, options)
+    : await dialog.showOpenDialog(options);
+
+  if (result.canceled || !result.filePaths?.length) return null;
+
+  const directory = path.resolve(result.filePaths[0]);
+  await ensureDirectory(directory);
+
+  const settings = await readSettings();
+  await writeSettings({ ...settings, gameDirectory: directory });
+
+  return { path: directory, isDefault: samePath(directory, defaultGameDirectory()) };
+}
+
+async function resetGameDirectory() {
+  const settings = await readSettings();
+  delete settings.gameDirectory;
+  await writeSettings(settings);
+
+  const directory = defaultGameDirectory();
+  await ensureDirectory(directory);
+  return { path: directory, isDefault: true };
+}
+
+async function openGameDirectory() {
+  const { path: directory } = await getGameDirectory();
+  const error = await shell.openPath(directory);
+  if (error) throw new Error(error);
+  return directory;
 }
 
 async function readCache(name) {
@@ -662,6 +757,10 @@ async function openExternal(rawUrl) {
 app.setAppUserModelId('com.fitlauncher.v2');
 
 app.whenReady().then(() => {
+  getGameDirectory().catch((error) => {
+    console.warn('Could not prepare the game folder:', error.message);
+  });
+
   ipcMain.handle('store:getHome', (_event, force) => getHomeData(Boolean(force)));
   ipcMain.handle('store:getNews', (_event, appIds, force) =>
     getNewsData(appIds, Boolean(force)),
@@ -675,6 +774,10 @@ app.whenReady().then(() => {
   );
   ipcMain.handle('settings:getCacheInfo', () => getCacheInfo());
   ipcMain.handle('settings:clearCache', () => clearAppCache());
+  ipcMain.handle('settings:getGameDirectory', () => getGameDirectory());
+  ipcMain.handle('settings:chooseGameDirectory', (event) => chooseGameDirectory(event));
+  ipcMain.handle('settings:resetGameDirectory', () => resetGameDirectory());
+  ipcMain.handle('settings:openGameDirectory', () => openGameDirectory());
   ipcMain.handle('shell:openExternal', (_event, url) => openExternal(url));
 
   createWindow();

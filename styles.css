@@ -3033,6 +3033,9 @@ body.lightbox-open {
   border: 1px solid var(--border);
   border-radius: 10px;
   background: linear-gradient(180deg, #17171d, #121217);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 
 .settings-nav-btn {
@@ -3136,6 +3139,29 @@ body.lightbox-open {
   font-size: 10px;
   line-height: 1.5;
   overflow-wrap: anywhere;
+}
+
+.settings-location-row {
+  align-items: flex-start;
+}
+
+.settings-location-row .settings-cache-info {
+  flex: 1;
+}
+
+.settings-location-path {
+  color: #f4f4f7;
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.settings-location-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
 }
 
 /* ---------- Responsive ---------- */
@@ -3287,6 +3313,15 @@ body.lightbox-open {
 
   .settings-cache-row .btn {
     width: 100%;
+  }
+
+  .settings-location-actions {
+    width: 100%;
+    justify-content: stretch;
+  }
+
+  .settings-location-actions .btn {
+    flex: 1 1 100%;
   }
 
   .hero {

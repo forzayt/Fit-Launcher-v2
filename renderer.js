@@ -47,6 +47,8 @@
     searchTimer: null,
     searchRequest: 0,
     searchLoading: false,
+    settingsTab: 'cache',
+    gameDirectory: '',
   };
 
   const toast = $('#toast');
@@ -1869,6 +1871,97 @@
     }
   }
 
+  function selectSettingsTab(tab) {
+    const next = tab === 'location' ? 'location' : 'cache';
+    state.settingsTab = next;
+
+    $$('[data-settings-tab]').forEach((button) => {
+      const active = button.dataset.settingsTab === next;
+      button.classList.toggle('is-active', active);
+      if (active) button.setAttribute('aria-current', 'page');
+      else button.removeAttribute('aria-current');
+    });
+
+    $$('[data-settings-panel]').forEach((panel) => {
+      panel.hidden = panel.dataset.settingsPanel !== next;
+    });
+
+    if (next === 'location') loadGameDirectory();
+  }
+
+  async function loadGameDirectory() {
+    const label = $('#gameDirLabel');
+    const hint = $('#gameDirHint');
+    const pathLabel = $('#gameDirPath');
+    if (!label) return;
+
+    label.textContent = 'Loading…';
+    if (hint) hint.textContent = '';
+    if (pathLabel) pathLabel.textContent = '';
+
+    try {
+      if (!api?.getGameDirectory) throw new Error('The desktop bridge is unavailable.');
+      const info = await api.getGameDirectory();
+      state.gameDirectory = info?.path || '';
+      label.textContent = state.gameDirectory || 'Not set';
+      if (hint) {
+        hint.textContent = info?.isDefault ? 'Default FitLauncher folder' : 'Custom folder';
+      }
+      if (pathLabel) {
+        pathLabel.textContent = info?.error || 'Downloaded games are saved in this folder.';
+      }
+    } catch (error) {
+      label.textContent = 'Unavailable';
+      if (pathLabel) pathLabel.textContent = error?.message || 'Could not read the game folder.';
+    }
+  }
+
+  async function chooseGameDirectory() {
+    if (!api?.chooseGameDirectory) {
+      showToast('Desktop bridge unavailable.');
+      return;
+    }
+
+    try {
+      const info = await api.chooseGameDirectory();
+      if (!info?.path) return;
+      state.gameDirectory = info.path;
+      showToast('Game folder updated');
+      await loadGameDirectory();
+    } catch (error) {
+      showToast(error?.message || 'Could not choose that folder.');
+    }
+  }
+
+  async function resetGameDirectory() {
+    if (!api?.resetGameDirectory) {
+      showToast('Desktop bridge unavailable.');
+      return;
+    }
+
+    try {
+      const info = await api.resetGameDirectory();
+      state.gameDirectory = info?.path || '';
+      showToast('Using the default FitLauncher folder');
+      await loadGameDirectory();
+    } catch {
+      showToast('Could not reset the game folder.');
+    }
+  }
+
+  async function openGameDirectory() {
+    if (!api?.openGameDirectory) {
+      showToast('Desktop bridge unavailable.');
+      return;
+    }
+
+    try {
+      await api.openGameDirectory();
+    } catch {
+      showToast('Could not open the game folder.');
+    }
+  }
+
   function newsCard(article) {
     const game = state.catalog.get(String(article.appid));
     const image = game?.headerImage || game?.image || '';
@@ -2033,7 +2126,10 @@
     if (name === 'browse') renderBrowse();
     if (name === 'wishlist') renderWishlist();
     if (name === 'news') loadNews();
-    if (name === 'settings') loadCacheInfo();
+    if (name === 'settings') {
+      selectSettingsTab(state.settingsTab);
+      loadCacheInfo();
+    }
     if (name === 'discover') startHeroAuto();
     else stopHeroAuto();
 
@@ -2305,6 +2401,12 @@
         return;
       }
 
+      const settingsTab = target.closest('[data-settings-tab]');
+      if (settingsTab) {
+        selectSettingsTab(settingsTab.dataset.settingsTab);
+        return;
+      }
+
       const action = target.closest('[data-action]');
       if (action) {
         handleAction(action.dataset.action);
@@ -2481,6 +2583,15 @@
         break;
       case 'clear-cache':
         clearCache();
+        break;
+      case 'choose-game-dir':
+        chooseGameDirectory();
+        break;
+      case 'open-game-dir':
+        openGameDirectory();
+        break;
+      case 'reset-game-dir':
+        resetGameDirectory();
         break;
       default:
         break;
