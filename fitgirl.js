@@ -15,11 +15,10 @@
  *   4. Group links by hoster (direct / torrent / game updates) for the UI.
  */
 
-const { app } = require('electron');
 const path = require('node:path');
-const os = require('node:os');
 const fs = require('node:fs/promises');
 const crypto = require('node:crypto');
+const { cacheDirectory } = require('./cache-location');
 
 const SITE = 'https://fitgirl-repacks.site';
 const CACHE_TTL = 6 * 60 * 60 * 1000;
@@ -229,12 +228,7 @@ function cacheFile(key) {
 let resolvedCacheDir = null;
 function cacheDir() {
   if (resolvedCacheDir) return resolvedCacheDir;
-  try {
-    const base = app?.getPath ? app.getPath('userData') : path.join(os.tmpdir(), 'fit-launcher');
-    resolvedCacheDir = path.join(base, 'cache');
-  } catch {
-    resolvedCacheDir = path.join(os.tmpdir(), 'fit-launcher', 'cache');
-  }
+  resolvedCacheDir = cacheDirectory();
   return resolvedCacheDir;
 }
 

@@ -1,8 +1,17 @@
-const { app, BrowserWindow, ipcMain, shell, screen, dialog } = require('electron');
+const {
+  app,
+  BrowserWindow,
+  ipcMain,
+  shell,
+  screen,
+  dialog,
+  session,
+} = require('electron');
 const path = require('node:path');
 const fs = require('node:fs/promises');
 const { getRepackDownloads, clearMemoryCache: clearFitGirlMemoryCache } = require('./fitgirl');
 const { startDownloads, cancelDownloads } = require('./downloads');
+const { cacheDirectory, legacyCacheDirectory } = require('./cache-location');
 
 const STEAM_API = {
   categories: 'https://store.steampowered.com/api/featuredcategories?cc=us&l=english',
@@ -30,10 +39,6 @@ const gameCache = new Map();
 const searchCache = new Map();
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function cacheDirectory() {
-  return path.join(app.getPath('userData'), 'cache');
-}
 
 function cachePath(name) {
   return path.join(cacheDirectory(), name);
@@ -87,8 +92,82 @@ async function clearAppCache() {
   searchCache.clear();
   clearFitGirlMemoryCache();
 
-  await fs.rm(cacheDirectory(), { recursive: true, force: true });
+  await removeCacheDirectory(cacheDirectory());
+  await removeLegacyCacheFiles();
+
+  // Chromium's HTTP cache lives next to ours; the button should clear that too.
+  try {
+    await session.defaultSession.clearCache();
+  } catch (error) {
+    console.warn('Could not clear the Chromium cache:', error.message);
+  }
+
   return getCacheInfo();
+}
+
+async function removeCacheDirectory(directory) {
+  try {
+    await fs.rm(directory, {
+      recursive: true,
+      force: true,
+      maxRetries: 5,
+      retryDelay: 100,
+    });
+    return;
+  } catch (error) {
+    if (error?.code === 'ENOENT') return;
+
+    // A file inside the tree may still be locked (antivirus, another process).
+    // Remove what we can instead of failing the whole operation.
+    let entries;
+    try {
+      entries = await fs.readdir(directory, { withFileTypes: true });
+    } catch (readError) {
+      if (readError?.code === 'ENOENT') return;
+      throw readError;
+    }
+
+    await Promise.all(
+      entries.map(async (entry) => {
+        const entryPath = path.join(directory, entry.name);
+        try {
+          await fs.rm(entryPath, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+        } catch (removeError) {
+          if (!['EBUSY', 'EPERM', 'ENOTEMPTY'].includes(removeError?.code)) {
+            console.warn('Could not remove cache entry:', removeError.message);
+          }
+        }
+      }),
+    );
+  }
+}
+
+// <userData>/cache was shared with Chromium's HTTP cache, so only delete the
+// JSON files this app created there and leave Chromium's files alone.
+async function removeLegacyCacheFiles() {
+  let entries;
+  try {
+    entries = await fs.readdir(legacyCacheDirectory(), { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (!entry.isFile()) return;
+      const isOwnCache =
+        entry.name === 'home.json' || /^fitgirl-[0-9a-f]+\.json$/i.test(entry.name);
+      if (!isOwnCache) return;
+
+      try {
+        await fs.unlink(path.join(legacyCacheDirectory(), entry.name));
+      } catch (error) {
+        if (error?.code !== 'ENOENT') {
+          console.warn('Could not remove old cache file:', error.message);
+        }
+      }
+    }),
+  );
 }
 
 const DEFAULT_GAME_FOLDER = 'FitLauncher';
